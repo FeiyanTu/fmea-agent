@@ -1,0 +1,485 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="/static/logo.png" />
+<title>智能体管理 - FMEA AgentOS</title>
+<style>
+:root {
+  --bg: #f0f2f5;
+  --white: #ffffff;
+  --primary: #2563eb;
+  --primary-light: #dbeafe;
+  --success: #10b981;
+  --success-light: #dcfce7;
+  --warning: #f59e0b;
+  --warning-light: #fef3c7;
+  --danger: #ef4444;
+  --danger-light: #fee2e2;
+  --purple: #7c3aed;
+  --purple-light: #ede9fe;
+  --teal: #0d9488;
+  --teal-light: #ccfbf1;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow: 0 4px 16px rgba(0,0,0,0.08);
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei","PingFang SC",sans-serif;
+  background: var(--bg);
+  min-height: 100vh;
+  color: var(--text);
+}
+.header {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+  padding: 0 32px; height: 60px; gap: 14px;
+  box-shadow: var(--shadow-sm);
+  position: sticky; top: 0; z-index: 100;
+}
+.header-logo {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; color: white; font-weight: 700;
+}
+.header-title { font-size: 17px; font-weight: 700; }
+.header-nav { margin-left: auto; display: flex; gap: 8px; }
+.nav-btn {
+  padding: 6px 16px; border-radius: 20px; font-size: 13px;
+  font-weight: 500; border: 1px solid var(--border);
+  background: var(--white); color: var(--text-secondary);
+  cursor: pointer; text-decoration: none;
+}
+.nav-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+.page-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.page-subtitle { font-size: 13px; color: var(--text-secondary); margin-bottom: 28px; }
+
+/* ═══ Architecture Diagram ═══ */
+.arch-diagram {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 24px 24px;
+  margin-bottom: 24px;
+}
+.arch-diagram h3 { font-size: 15px; font-weight: 600; margin-bottom: 20px; text-align: center; }
+
+.arch-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* Vertical connector between tiers */
+.arch-connector {
+  position: relative;
+  height: 32px;
+  width: 2px;
+  background: #94a3b8;
+  margin: 2px 0;
+}
+.arch-connector::after {
+  content: "";
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid #94a3b8;
+}
+
+/* Tier cards */
+.arch-tier {
+  border-radius: var(--radius-sm);
+  padding: 16px 22px;
+  text-align: center;
+}
+.arch-tier-full { width: 100%; }
+.arch-tier-narrow { width: 65%; }
+
+.arch-tier-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 6px;
+  text-align: center;
+}
+.arch-tier-name { font-size: 15px; font-weight: 600; text-align: center; }
+.arch-tier-desc { font-size: 11px; margin-top: 4px; text-align: center; }
+
+.arch-tier.t1 { background: linear-gradient(135deg, #1e1b4b, #312e81); border-color: transparent; }
+.arch-tier.t1 .arch-tier-label,
+.arch-tier.t1 .arch-tier-name,
+.arch-tier.t1 .arch-tier-desc { color: white; }
+.arch-tier.t1 .arch-tier-desc { color: #c7d2fe; }
+.arch-tier.t2 { background: linear-gradient(135deg, #1e3a8a, #2563eb); border-color: transparent; }
+.arch-tier.t2 .arch-tier-label,
+.arch-tier.t2 .arch-tier-name { color: white; }
+.arch-tier.t2 .arch-tier-desc { color: #bfdbfe; }
+.arch-tier.t3 { background: var(--success-light); border: 1px solid #86efac; }
+.arch-tier.t3 .arch-tier-label { color: #15803d; }
+.arch-tier.t3 .arch-tier-name { color: #14532d; }
+.arch-tier.t3 .arch-tier-desc { color: #166534; }
+
+/* Expert cards - 4+3 centered grid */
+.arch-pro-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: center;
+}
+.arch-pro-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.arch-pro {
+  background: white;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border: 1px solid #bbf7d0;
+  width: 126px;
+  text-align: center;
+}
+.arch-pro .pro-name { font-weight: 600; color: #14532d; }
+.arch-pro .pro-domain { font-size: 10px; color: #166534; margin-top: 2px; }
+
+/* ═══ System Stats ═══ */
+.system-stats {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin-bottom: 24px;
+}
+.system-stats h3 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.sys-item { padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.sys-item .label { font-size: 11px; color: var(--text-muted); }
+.sys-item .value { font-size: 18px; font-weight: 700; color: var(--text); margin-top: 4px; }
+
+/* ═══ Section Title ═══ */
+.section-title {
+  font-size: 15px; font-weight: 600; margin: 28px 0 14px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.section-title .badge-count {
+  background: var(--primary-light); color: var(--primary);
+  font-size: 11px; font-weight: 700; padding: 2px 8px;
+  border-radius: 10px; margin-left: 4px;
+}
+
+/* ═══ Agent Card ═══ */
+.agent-grid { display: flex; flex-direction: column; gap: 12px; }
+.agent-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 22px;
+  display: flex; gap: 18px; align-items: flex-start;
+}
+.agent-card:hover { box-shadow: var(--shadow); border-color: transparent; }
+.agent-icon {
+  width: 52px; height: 52px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: white; flex-shrink: 0; font-weight: 700;
+}
+.agent-body { flex: 1; min-width: 0; }
+.agent-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.agent-name { font-size: 15px; font-weight: 600; }
+.agent-tier-badge {
+  font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.agent-tier-badge.t1 { background: #1e1b4b; color: white; }
+.agent-tier-badge.t2 { background: var(--primary); color: white; }
+.agent-tier-badge.t3 { background: var(--success); color: white; }
+.agent-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500;
+}
+.agent-status.active { background: var(--success-light); color: var(--success); }
+.agent-status.idle { background: #f1f5f9; color: var(--text-muted); }
+.agent-domain { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.agent-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
+
+.agent-details {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  margin-top: 12px; padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+}
+.agent-detail-block .block-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 6px;
+}
+.responsibility-list, .boundary-list {
+  display: flex; flex-direction: column; gap: 3px;
+}
+.responsibility-list li, .boundary-list li {
+  list-style: none; padding-left: 12px; position: relative; color: var(--text-secondary);
+  font-size: 12px; line-height: 1.5;
+}
+.responsibility-list li::before { content: "●"; position: absolute; left: 0; color: var(--success); font-size: 8px; top: 5px; }
+.boundary-list li::before { content: "✗"; position: absolute; left: 0; color: var(--danger); font-size: 10px; top: 4px; }
+
+.agent-tools {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px;
+}
+.tool-tag {
+  padding: 2px 8px; border-radius: 4px; font-size: 11px;
+  background: var(--bg); color: var(--text-secondary);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: nowrap;
+}
+
+.agent-footer {
+  display: flex; gap: 12px; margin-top: 10px;
+  font-size: 11px; color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  flex-wrap: wrap;
+}
+.agent-footer .file { background: #f1f5f9; padding: 1px 6px; border-radius: 3px; }
+.agent-footer .kb-badge { background: #e0e7ff; color: #3730a3; padding: 1px 6px; border-radius: 3px; }
+
+@media (max-width: 760px) {
+  .arch-tier-narrow { width: 100%; }
+  .arch-pro { width: calc(50% - 8px); }
+  .arch-pro-row { flex-wrap: wrap; }
+  .agent-details { grid-template-columns: 1fr; }
+  .agent-card { flex-direction: column; gap: 12px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-logo">🤖</div>
+  <div class="header-title">智能体管理</div>
+  <div class="header-nav">
+    <a href="/" class="nav-btn">← 控制台</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="page-title">多 Agent 协作架构</div>
+  <div class="page-subtitle">1+N 架构：1 个系统集成专家 + 1 个工作流编排 + 1 个法规专家 + 6 个专业 Agent</div>
+
+  <!-- 架构图 -->
+  <div class="arch-diagram">
+    <h3>🏛 三层架构</h3>
+    <div class="arch-flow">
+
+      <!-- Tier 1 - 全宽置顶 -->
+      <div class="arch-tier t1 arch-tier-full">
+        <div class="arch-tier-label">Tier 1 · 总负责人</div>
+        <div class="arch-tier-name">🎯 系统集成专家</div>
+        <div class="arch-tier-desc">统筹 · 步法全流程 · 基线锁定 · 打分统一 · 阶段放行 · 冲突仲裁</div>
+      </div>
+
+      <!-- 连接线 -->
+      <div class="arch-connector"></div>
+
+      <!-- Tier 2 - 居中缩进 -->
+      <div class="arch-tier t2 arch-tier-narrow">
+        <div class="arch-tier-label">Tier 2 · 工作流编排</div>
+        <div class="arch-tier-name">⏱ 工作流编排 Agent</div>
+        <div class="arch-tier-desc">阶段 2-6 全员确认 · 定时检查 · 推送提醒 · 自动唤醒下一步</div>
+      </div>
+
+      <!-- 连接线 -->
+      <div class="arch-connector"></div>
+
+      <!-- Tier 3 - 全宽 4+3 居中网格 -->
+      <div class="arch-tier t3 arch-tier-full">
+        <div class="arch-tier-label">Tier 3 · 领域专家</div>
+        <div class="arch-tier-name">📚 法规专家 + 6 个专业 Agent</div>
+        <div class="arch-pro-grid">
+          <div class="arch-pro-row">
+            <div class="arch-pro">
+              <div class="pro-name">法规专家</div>
+              <div class="pro-domain">WeKnora 检索 · 文件 1</div>
+            </div>
+            <div class="arch-pro">
+              <div class="pro-name">BMS 需求</div>
+              <div class="pro-domain">整车交互 · 功能安全</div>
+            </div>
+            <div class="arch-pro">
+              <div class="pro-name">BMS 软件</div>
+              <div class="pro-domain">均衡 · 热管理 · 故障诊断</div>
+            </div>
+            <div class="arch-pro">
+              <div class="pro-name">BMS 硬件</div>
+              <div class="pro-domain">采集回路 · 电源 · 绝缘</div>
+            </div>
+          </div>
+          <div class="arch-pro-row">
+            <div class="arch-pro">
+              <div class="pro-name">电芯</div>
+              <div class="pro-domain">析锂 · 产气 · 热失控</div>
+            </div>
+            <div class="arch-pro">
+              <div class="pro-name">结构</div>
+              <div class="pro-domain">箱体 · 密封 · 防爆阀</div>
+            </div>
+            <div class="arch-pro">
+              <div class="pro-name">电气</div>
+              <div class="pro-domain">高压回路 · 熔断器 · 绝缘</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 系统信息 -->
+  <div class="system-stats">
+    <h3>系统信息</h3>
+    <div class="sys-grid">
+      <div class="sys-item"><div class="label">智能体总数</div><div class="value" id="agentCount">9</div></div>
+      <div class="sys-item"><div class="label">总负责人</div><div class="value" style="font-size:14px;margin-top:6px">1 个</div></div>
+      <div class="sys-item"><div class="label">专业 Agent</div><div class="value" style="font-size:14px;margin-top:6px">7 个</div></div>
+      <div class="sys-item"><div class="label">架构</div><div class="value" style="font-size:13px;margin-top:6px">1 + 1 + 7</div></div>
+      <div class="sys-item"><div class="label">运行状态</div><div class="value" style="font-size:14px;color:var(--success);margin-top:6px">● 全部就绪</div></div>
+      <div class="sys-item"><div class="label">知识库</div><div class="value" style="font-size:13px;margin-top:6px">WeKnora</div></div>
+      <div class="sys-item"><div class="label">应用框架</div><div class="value" style="font-size:13px;margin-top:6px">Agno AgentOS</div></div>
+      <div class="sys-item"><div class="label">FMEA 标准</div><div class="value" style="font-size:13px;margin-top:6px">AIAG-VDA 2021</div></div>
+    </div>
+  </div>
+
+  <!-- Tier 1: 系统集成专家 -->
+  <div class="section-title">🎯 Tier 1 · 系统集成专家 <span class="badge-count">1</span></div>
+  <div class="agent-grid" id="tier1"></div>
+
+  <!-- Tier 2: 工作流编排 -->
+  <div class="section-title">⏱ Tier 2 · 工作流编排 Agent <span class="badge-count">1</span></div>
+  <div class="agent-grid" id="tier2"></div>
+
+  <!-- Tier 3: 领域专家 -->
+  <div class="section-title">📚 Tier 3 · 领域专家 <span class="badge-count">7</span></div>
+  <div class="agent-grid" id="tier3"></div>
+
+</div>
+
+<script>
+// ── 从 DB API 获取 Agent 配置后渲染 ──
+
+function renderCard(a) {
+  const tierClass = 't' + (a.tier || 3);
+  const file = a.source_file || a.file || '';
+  const enName = a.name_en || '';
+
+  return `
+    <div class="agent-card">
+      <div class="agent-icon" style="background:${a.color}">${a.icon}</div>
+      <div class="agent-body">
+        <div class="agent-header">
+          <span class="agent-name">${a.name}</span>
+          <span class="agent-tier-badge ${tierClass}">${a.tier_label}</span>
+          <span class="agent-status ${a.status}">● ${a.status_label}</span>
+        </div>
+        <div class="agent-domain">${a.domain} <span style="color:var(--text-muted)">· ${enName}</span></div>
+        <div class="agent-desc">${a.description}</div>
+        <div class="agent-details">
+          <div class="agent-detail-block">
+            <div class="block-label">核心职责</div>
+            <ul class="responsibility-list">
+              ${(a.responsibilities || []).map(r => `<li>${r}</li>`).join('')}
+            </ul>
+          </div>
+          <div class="agent-detail-block">
+            <div class="block-label">边界约束（禁止越界）</div>
+            <ul class="boundary-list">
+              ${(a.boundaries || []).map(b => `<li>${b}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+        <div class="agent-tools">
+          ${(a.tools || []).map(t => `<span class="tool-tag">${t}</span>`).join('')}
+        </div>
+        <div class="agent-footer">
+          ${file ? `<span class="file">📁 ${file}</span>` : ''}
+          ${a.weknora_kb_id ? `<span class="kb-badge">📀 KB: ${a.weknora_kb_id}</span>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function loadAgents() {
+  try {
+    const token = localStorage.getItem('fmea_token');
+    const headers = {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    const resp = await fetch('/api/agents', { headers });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const agents = data.agents || [];
+
+    const tier1 = agents.filter(a => a.tier === 1);
+    const tier2 = agents.filter(a => a.tier === 2);
+    const tier3 = agents.filter(a => a.tier === 3);
+
+    document.getElementById('tier1').innerHTML = tier1.map(renderCard).join('');
+    document.getElementById('tier2').innerHTML = tier2.map(renderCard).join('');
+
+    if (tier3.length > 0) {
+      document.getElementById('tier3').innerHTML = tier3.map(renderCard).join('');
+      const badge = document.querySelector('.section-title:last-child .badge-count');
+      if (badge) badge.textContent = tier3.length;
+    }
+
+    const countEl = document.getElementById('agentCount');
+    if (countEl) countEl.textContent = agents.length;
+  } catch (e) {
+    console.error('加载 Agent 数据失败:', e);
+    document.getElementById('tier1').innerHTML =
+      '<div style="text-align:center;padding:32px;color:var(--danger)">加载 Agent 数据失败: ' + e.message + '</div>';
+  }
+}
+loadAgents();
+
+// 权限检查
+const token = localStorage.getItem('fmea_token');
+const userStr = localStorage.getItem('fmea_user');
+if (!token) { window.location.href = '/login'; }
+if (userStr) {
+  try {
+    const user = JSON.parse(userStr);
+    if (user.role !== 'admin') { window.location.href = '/'; }
+  } catch(e) { window.location.href = '/login'; }
+}
+fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + token } })
+  .then(r => r.json())
+  .then(data => { if (!data.user || data.user.role !== 'admin') window.location.href = '/'; })
+  .catch(() => {});
+</script>
+</body>
+</html>

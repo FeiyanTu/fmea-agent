@@ -1,0 +1,156 @@
+# HEV 混动动力电池包 DV 阶段 DFMEA 项目配置
+# 对应需求规格 §2.2 案例项目范围 & §2.4 案例典型工况
+
+project_name: HEV电池包DV阶段DFMEA
+product_type: HEV 混动动力电池包
+development_phase: DV
+
+product_hierarchy:
+  - 总成
+  - 子系统
+  - 子零件
+  - 下级子零件
+
+# ── 专业 Agent 配置 ──
+agents:
+  - name: bms_requirement
+    display_name: BMS需求专家
+    domain: 整车交互需求、高压功能需求、功能安全指标、客户性能指标拆解
+    responsibilities:
+      - 需求定义分析
+      - 性能指标拆解
+      - 功能安全需求识别
+    boundaries:
+      - 不介入BMS软件实现
+      - 不涉及硬件电路设计
+
+  - name: bms_software
+    display_name: BMS软件专家
+    domain: BMS 均衡算法、热管理控制逻辑、故障诊断策略、整车通讯交互、控制时序
+    responsibilities:
+      - 软件策略分析
+      - 控制逻辑失效分析
+      - 通讯交互失效分析
+    boundaries:
+      - 不涉及硬件电路
+      - 不介入电芯电化学
+
+  - name: bms_hardware
+    display_name: BMS硬件专家
+    domain: 电压/温度采集回路、高压主板、电源电路、绝缘检测硬件、板端接插件
+    responsibilities:
+      - 元器件选型分析
+      - 电路拓扑失效分析
+      - 硬件接口失效分析
+    boundaries:
+      - 不介入软件控制逻辑
+      - 不涉及电芯本体
+
+  - name: cell
+    display_name: 电芯专家
+    domain: 电芯电化学设计、析锂、内部产气、极片内短路、热失控机理、循环衰减
+    responsibilities:
+      - 电芯本体失效分析
+      - 热失控机理分析
+      - 循环寿命分析
+    boundaries:
+      - 不涉及BMS控制
+      - 不涉及Pack结构
+
+  - name: structure
+    display_name: 结构专家
+    domain: Pack 箱体、模组端侧板、密封结构、防爆阀、液冷流道、紧固件
+    responsibilities:
+      - 结构强度分析
+      - 密封防水分析
+      - 振动冲击分析
+    boundaries:
+      - 不涉及电气回路
+      - 不涉及电芯化学
+
+  - name: electrical
+    display_name: 电气专家
+    domain: 高压铜铝排、高低压线束、连接器、熔断器、主继电器、等电位设计、高压绝缘
+    responsibilities:
+      - 高压回路分析
+      - 绝缘设计分析
+      - 连接器选型分析
+    boundaries:
+      - 不涉及结构力学
+      - 不涉及软件控制
+
+  - name: regulation
+    display_name: 法规专家
+    domain: 七大专业维度法规检索、标准条款原文解读、强制条款与产品风险点匹配映射
+    responsibilities:
+      - 法规检索
+      - 条款解读
+      - 合规映射
+    boundaries:
+      - 仅负责法规解读与映射
+      - 不参与工程失效分析
+
+# ── 法规标准清单 ──
+regulation_list:
+  - GB38031-2020   # 电动汽车用动力蓄电池安全要求
+  - R100            # 联合国电动车辆安全法规
+  - UN38.3          # 锂电池运输安全试验
+  - GB/T 4208       # 外壳防护等级 IP代码
+  - GB/T 34590      # 道路车辆功能安全 ISO 26262
+
+# ── 典型工况 ──
+boundary_conditions:
+  - 频繁启停工况
+  - 高低温环境工况 (-30°C ~ 60°C)
+  - 宽倍率充放电工况
+  - 道路随机振动工况
+  - 碰撞冲击工况
+  - 电芯热失控蔓延工况
+  - 整车高压上下电逻辑工况
+
+# ── 排除范围 ──
+analysis_exclusions:
+  - 生产过程装配不良类失效
+  - 来料零部件质量缺陷类失效
+  - 客户不当使用类失效
+
+# ── 跨专业高风险连锁主题 ──
+high_risk_themes:
+  - theme: 热失控蔓延
+    involved_agents:
+      - cell
+      - structure
+      - bms_software
+  - theme: 高压绝缘失效
+    involved_agents:
+      - electrical
+      - structure
+      - bms_hardware
+  - theme: 碰撞防护失效
+    involved_agents:
+      - structure
+      - electrical
+      - cell
+  - theme: BMS 控制逻辑异常
+    involved_agents:
+      - bms_software
+      - bms_requirement
+      - electrical
+
+# ── 打分标准 (使用 AIAG-VDA 2021 默认) ──
+sod_criteria:
+  s:
+    description: 严重度 S 评分标准 (1-10)
+    reference: AIAG-VDA FMEA 2021 标准 S 表
+  o:
+    description: 发生度 O 评分标准 (1-10)
+    reference: AIAG-VDA FMEA 2021 标准 O 表
+  d:
+    description: 探测度 D 评分标准 (1-10)
+    reference: AIAG-VDA FMEA 2021 标准 D 表
+  ap:
+    description: AP 风险优先级分级规则 H/M/L
+    reference: AIAG-VDA FMEA 2021 AP 表
+
+# ── DFMEA 模板 ──
+dfmea_template: aiag_vda_2021

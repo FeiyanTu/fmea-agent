@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FMEA AgentOS 管理控制台</title>
+<link rel="icon" type="image/png" href="/static/logo.png" />
+<style>
+:root {
+  --bg: #f0f2f5;
+  --white: #ffffff;
+  --primary: #2563eb;
+  --primary-light: #dbeafe;
+  --primary-hover: #1d4ed8;
+  --success: #10b981;
+  --success-light: #dcfce7;
+  --warning: #f59e0b;
+  --warning-light: #fef3c7;
+  --danger: #ef4444;
+  --danger-light: #fee2e2;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow: 0 8px 30px rgba(0,0,0,0.08);
+  --shadow-hover: 0 12px 40px rgba(0,0,0,0.12);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei","PingFang SC",sans-serif;
+  background: var(--bg);
+  min-height: 100vh;
+  color: var(--text);
+}
+
+/* ═══ Header ═══ */
+.header {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  height: 60px;
+  gap: 14px;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.header-logo {
+  width: 36px; height: 36px;
+  background: white;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  padding: 4px;
+  overflow: hidden;
+}
+.header-logo img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+}
+.header-title {
+  font-size: 17px; font-weight: 700; color: var(--text);
+}
+.header-subtitle {
+  font-size: 12px; color: var(--text-muted); margin-left: auto;
+}
+.header-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+.user-avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--primary-light);
+  color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+}
+.user-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.user-role-badge {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #ede9fe;
+  color: #7c3aed;
+  margin-left: 4px;
+}
+.logout-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--white);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+  margin-left: 8px;
+}
+.logout-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ═══ Hero ═══ */
+.hero {
+  text-align: center;
+  padding: 48px 24px 32px;
+}
+.hero h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.hero p {
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+/* ═══ Card Grid ═══ */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px 48px;
+}
+
+.card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 32px 28px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+}
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
+}
+
+/* Card accent colors */
+.card-fmea::before { background: linear-gradient(90deg, #2563eb, #60a5fa); }
+.card-team::before { background: linear-gradient(90deg, #10b981, #34d399); }
+.card-agent::before { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+
+.card-icon {
+  width: 52px; height: 52px;
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px;
+  margin-bottom: 18px;
+}
+.card-fmea .card-icon { background: var(--primary-light); color: var(--primary); }
+.card-team .card-icon { background: var(--success-light); color: var(--success); }
+.card-agent .card-icon { background: #ede9fe; color: #7c3aed; }
+
+.card h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.card-stats span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.card-stats .num {
+  font-weight: 600;
+  color: var(--text);
+}
+.card-link {
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.card-fmea .card-link { color: var(--primary); }
+.card-team .card-link { color: var(--success); }
+.card-agent .card-link { color: #7c3aed; }
+
+/* ═══ Footer ═══ */
+.footer {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ═══ Status Badge ═══ */
+.status-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.status-online { background: var(--success); }
+.status-offline { background: var(--danger); }
+
+/* ═══ Responsive ═══ */
+@media (max-width: 700px) {
+  .header { padding: 0 16px; }
+  .hero { padding: 32px 16px 24px; }
+  .hero h1 { font-size: 22px; }
+  .grid { grid-template-columns: 1fr; padding: 0 16px 32px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-logo"><img src="/static/logo.png" alt="清陶动力" /></div>
+  <div class="header-title">FMEA AgentOS</div>
+  <span class="header-subtitle">失效模式与影响分析智能体系统</span>
+  <span class="header-info"><span class="status-dot status-online"></span>系统运行中</span>
+  <div class="header-user" id="userInfo">
+    <div class="user-avatar" id="userAvatar">U</div>
+    <div class="user-info">
+      <span id="userDisplayName">未登录</span>
+      <span class="user-role-badge" id="userRoleBadge" style="display:none"></span>
+    </div>
+    <button class="logout-btn" id="logoutBtn" onclick="doLogout()" style="display:none">退出</button>
+  </div>
+</div>
+
+<div class="hero">
+  <h1>🚀 FMEA 智能分析平台</h1>
+  <p>基于 AI 的失效模式与影响分析工作台，提供从结构树构建到报告生成的全流程智能辅助。</p>
+</div>
+
+<div class="grid">
+
+  <!-- FMEA管理 -->
+  <div class="card card-fmea" onclick="location.href='/chat'">
+    <div class="card-icon">📋</div>
+    <h2>FMEA 管理</h2>
+    <p>管理当前 FMEA 项目，包括项目创建、结构树构建、功能分析、失效分析、风险评估、优化方案及文档生成。</p>
+    <div class="card-stats">
+      <span>项目数 <span class="num" id="projectCount">-</span></span>
+      <span>状态 <span class="status-dot status-online"></span>运行中</span>
+    </div>
+    <div class="card-link">进入工作台 →</div>
+  </div>
+
+  <!-- 团队管理（仅管理员可见） -->
+  <div class="card card-team" id="teamCard" onclick="location.href='/team'" style="display:none">
+    <div class="card-icon">👥</div>
+    <h2>团队管理</h2>
+    <p>管理 FMEA 团队成员，分配角色与职责，追踪团队成员的项目参与情况，确保跨部门协作高效顺畅。</p>
+    <div class="card-stats">
+      <span>成员数 <span class="num" id="memberCount">-</span></span>
+      <span>角色 <span class="num">3</span> 种</span>
+    </div>
+    <div class="card-link">管理团队 →</div>
+  </div>
+
+  <!-- 智能体管理（仅管理员可见） -->
+  <div class="card card-agent" id="agentCard" onclick="location.href='/agent'" style="display:none">
+    <div class="card-icon">🤖</div>
+    <h2>智能体管理</h2>
+    <p>管理和监控多 Agent 协作架构，查看运行状态、调整配置参数，确保分析流程稳定高效。</p>
+    <div class="card-stats">
+      <span>智能体 <span class="num">9</span> 个</span>
+      <span>状态 <span class="status-dot status-online"></span>已就绪</span>
+    </div>
+    <div class="card-link">查看智能体 →</div>
+  </div>
+
+</div>
+
+<div class="footer">
+  FMEA AgentOS &copy; 2026 &mdash; 清陶动力科技（上海）有限公司
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+
+// ═══ 权限检查 ═══
+const token = localStorage.getItem('fmea_token');
+const userStr = localStorage.getItem('fmea_user');
+
+function requireAuth() {
+  const token = localStorage.getItem('fmea_token');
+  if (!token) {
+    window.location.href = '/login';
+    return false;
+  }
+  return true;
+}
+
+function doLogout() {
+  localStorage.removeItem('fmea_token');
+  localStorage.removeItem('fmea_user');
+  window.location.href = '/login';
+}
+
+function getAuthHeaders() {
+  const token = localStorage.getItem('fmea_token');
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
+}
+
+// ═══ 页面初始化 ═══
+document.addEventListener('DOMContentLoaded', async () => {
+  if (!requireAuth()) return;
+
+  // 显示用户信息
+  if (userStr) {
+    try {
+      const user = JSON.parse(userStr);
+      document.getElementById('userDisplayName').textContent = user.display_name || user.username;
+      document.getElementById('userAvatar').textContent = (user.display_name || user.username || 'U').charAt(0).toUpperCase();
+      const badge = document.getElementById('userRoleBadge');
+      if (user.role === 'admin') {
+        badge.textContent = '管理员';
+        badge.style.display = '';
+      } else {
+        badge.style.display = 'none';
+      }
+      document.getElementById('logoutBtn').style.display = '';
+
+      // 管理员显示团队和智能体管理
+      if (user.role === 'admin') {
+        document.getElementById('teamCard').style.display = '';
+        document.getElementById('agentCard').style.display = '';
+      }
+    } catch (e) {}
+  } else {
+    // 从 API 获取用户信息
+    try {
+      const res = await fetch(API_BASE + '/api/auth/me', {
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      if (data.user) {
+        localStorage.setItem('fmea_user', JSON.stringify(data.user));
+        document.getElementById('userDisplayName').textContent = data.user.display_name || data.user.username;
+        document.getElementById('userAvatar').textContent = (data.user.display_name || data.user.username || 'U').charAt(0).toUpperCase();
+        const badge = document.getElementById('userRoleBadge');
+        if (data.user.role === 'admin') {
+          badge.textContent = '管理员';
+          badge.style.display = '';
+          document.getElementById('teamCard').style.display = '';
+          document.getElementById('agentCard').style.display = '';
+        }
+        document.getElementById('logoutBtn').style.display = '';
+      }
+    } catch (e) {
+      doLogout();
+    }
+  }
+
+  // 加载项目数
+  fetch(API_BASE + '/api/projects', {
+    headers: getAuthHeaders()
+  })
+    .then(r => r.json())
+    .then(data => {
+      const count = Array.isArray(data) ? data.length : (data.projects ? data.projects.length : '-');
+      document.getElementById('projectCount').textContent = count;
+    })
+    .catch(() => {
+      document.getElementById('projectCount').textContent = '-';
+    });
+
+  // 加载团队成员数（系统注册用户数）
+  fetch(API_BASE + '/api/auth/users', {
+    headers: getAuthHeaders()
+  })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('memberCount').textContent = Array.isArray(data) ? data.length : '-';
+    })
+    .catch(() => {
+      document.getElementById('memberCount').textContent = '-';
+    });
+});
+</script>
+</body>
+</html>

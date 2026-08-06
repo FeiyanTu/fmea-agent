@@ -1,0 +1,47 @@
+# ════════════════════════════════════════════════════════════
+# FMEA Agent — .gitignore
+# ════════════════════════════════════════════════════════════
+
+# ── 敏感文件（含 API Key / 服务器凭据，禁止上传）──
+fmea-agent/.env
+fmea-agent/.envbat
+服务器密码.txt
+
+# ── 打包产物 ──
+*.zip
+*.tar.gz
+
+# ── 第三方框架源码（agno 本地注册，不入库）──
+agno/
+
+# ── 离线依赖包（156 个 wheel，不入库）──
+wheels/
+
+# ── Python 缓存 ──
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# ── 虚拟环境 ──
+.venv/
+venv/
+env/
+
+# ── IDE / 编辑器 ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── 运行期数据 ──
+fmea-agent/data/
+fmea-agent/tmp/
+fmea-agent/logs/
+fmea-agent/output/
+fmea-agent/reports/
+fmea-agent/extraData/
+
+# ── 项目知识库数据（保留 knowledge/ 下代码，排除数据目录）──
+fmea-agent/knowledge/*/

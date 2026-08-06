@@ -1,0 +1,41 @@
+# docker-compose.yml — 在服务器上运行 FMEA Agent
+#
+# 使用方式:
+#   docker compose up -d
+#   docker compose down       # 停止
+#
+# 注意: .env 已打包进镜像，docker-compose.yml 中不再依赖外部 .env 文件
+#       如需覆盖镜像内的环境变量，可通过 environment 字段或同级 .env 文件
+
+services:
+  fmea-agent:
+    image: fmea-agent:latest
+    container_name: fmea-agent
+    restart: unless-stopped
+    ports:
+      - "7777:7777"
+    # 外部 .env 可选：用于覆盖镜像内已打包的配置
+    env_file:
+      - .env
+    # 数据持久化（防止容器重启后数据丢失）
+    volumes:
+      - fmea_data:/app/fmea-agent/data
+      - fmea_logs:/app/fmea-agent/logs
+      - fmea_tmp:/app/fmea-agent/tmp
+      - fmea_reports:/app/fmea-agent/reports
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  fmea_data:
+    driver: local
+  fmea_logs:
+    driver: local
+  fmea_tmp:
+    driver: local
+  fmea_reports:
+    driver: local

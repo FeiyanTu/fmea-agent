@@ -1,0 +1,36 @@
+# .dockerignore — 排除不需要进入镜像的文件
+# 注意：数据目录（data/、knowledge/、tmp/、reports/、logs/）不在此排除，会全部打包
+
+# Git（递归匹配所有层级的 .git）
+.git
+**/.git
+.fmea-agent/.git
+.agno/.git
+.gitignore
+
+# Python 缓存
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+
+# 环境（.venv 等虚拟环境排除，.env 保留打入镜像供便携部署）
+.envbat
+.venv
+venv
+env
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# 日志（运行时重新创建）
+logs/*.log
+**/logs/*.log
+server.log
+
+# 临时文件
+gen_log.txt
+start.bat

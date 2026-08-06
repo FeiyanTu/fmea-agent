@@ -1,0 +1,16 @@
+[Unit]
+Description=FMEA AgentOS Server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=fmea
+WorkingDirectory=/opt/fmea-agent
+ExecStart=/opt/fmea-agent/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+# 可自行调整内存/文件句柄限制
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

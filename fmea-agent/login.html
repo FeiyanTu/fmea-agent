@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="/static/logo.png" />
+<title>登录 - FMEA AgentOS</title>
+<style>
+:root {
+  --bg: #f0f2f5;
+  --white: #ffffff;
+  --primary: #2563eb;
+  --primary-light: #dbeafe;
+  --primary-hover: #1d4ed8;
+  --success: #10b981;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --shadow: 0 8px 30px rgba(0,0,0,0.08);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei","PingFang SC",sans-serif;
+  background: var(--bg);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+.auth-container {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 40px 36px;
+  width: 400px;
+  max-width: 90vw;
+}
+.auth-logo {
+  width: 48px; height: 48px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: white; font-weight: 700;
+  margin: 0 auto 16px;
+}
+.auth-title {
+  font-size: 22px; font-weight: 700;
+  text-align: center; margin-bottom: 4px;
+}
+.auth-subtitle {
+  font-size: 13px; color: var(--text-muted);
+  text-align: center; margin-bottom: 28px;
+}
+.form-group {
+  margin-bottom: 18px;
+}
+.form-group label {
+  display: block;
+  font-size: 13px; font-weight: 500;
+  color: var(--text-secondary); margin-bottom: 6px;
+}
+.form-group input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.form-group input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+.btn {
+  width: 100%;
+  padding: 11px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-primary {
+  background: var(--primary);
+  color: white;
+}
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  margin-top: 10px;
+}
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+.auth-error {
+  background: #fee2e2;
+  color: #dc2626;
+  font-size: 13px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  display: none;
+}
+.auth-error.show { display: block; }
+.auth-toggle {
+  text-align: center;
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.auth-toggle a {
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 500;
+}
+.auth-toggle a:hover { text-decoration: underline; }
+.loading-spinner {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="auth-container">
+  <div class="auth-logo">F</div>
+  <div class="auth-title">FMEA AgentOS</div>
+  <div class="auth-subtitle">失效模式与影响分析智能体系统</div>
+
+  <div class="auth-error" id="authError"></div>
+
+  <!-- 登录表单 -->
+  <div id="loginForm">
+    <div class="form-group">
+      <label>邮箱</label>
+      <input type="email" id="loginUsername" placeholder="请输入邮箱" autocomplete="email" />
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="password" id="loginPassword" placeholder="请输入密码" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">登 录</button>
+    <div class="auth-toggle">
+      还没有账号？<a onclick="goExternalRegister()">立即注册</a>
+    </div>
+  </div>
+
+  <!-- 注册表单 -->
+  <div id="registerForm" style="display:none">
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="regUsername" placeholder="2-50个字符" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label>显示名称</label>
+      <input type="text" id="regDisplayName" placeholder="如何称呼您（选填）" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="password" id="regPassword" placeholder="至少4个字符" autocomplete="new-password" />
+    </div>
+    <button class="btn btn-primary" id="registerBtn" onclick="doRegister()">注 册</button>
+    <div class="auth-toggle">
+      已有账号？<a onclick="showLogin()">返回登录</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+
+function showError(msg) {
+  const el = document.getElementById('authError');
+  el.textContent = msg;
+  el.classList.add('show');
+}
+
+function hideError() {
+  document.getElementById('authError').classList.remove('show');
+}
+
+function showRegister() {
+  hideError();
+  document.getElementById('loginForm').style.display = 'none';
+  document.getElementById('registerForm').style.display = 'block';
+}
+
+// v24.4: 跳转 WeKnora（10.180.17.11:81）注册页——带 register=true URL 参数
+//   约定：如果 WeKnora SPA 支持 ?register=true 参数，会自动展开注册面板；
+//   否则需要让 WeKnora 那边在 Vue Router 加 onMounted 钩子解析此参数自动点 "创建账户" 按钮
+function goExternalRegister() {
+  window.location.href = 'http://10.180.17.11:81/login?register=true';
+}
+
+function showLogin() {
+  hideError();
+  document.getElementById('registerForm').style.display = 'none';
+  document.getElementById('loginForm').style.display = 'block';
+}
+
+async function doLogin() {
+  hideError();
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value.trim();
+  if (!username || !password) { showError('请填写用户名和密码'); return; }
+
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span>登录中...';
+
+  try {
+    const res = await fetch(API_BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { showError(data.error || '登录失败'); return; }
+
+    localStorage.setItem('fmea_token', data.token);
+    localStorage.setItem('fmea_user', JSON.stringify(data.user));
+    window.location.replace('/');
+  } catch (e) {
+    showError('网络错误，请重试');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登 录';
+  }
+}
+
+async function doRegister() {
+  hideError();
+  const username = document.getElementById('regUsername').value.trim();
+  const password = document.getElementById('regPassword').value.trim();
+  const display_name = document.getElementById('regDisplayName').value.trim();
+
+  if (!username || !password) { showError('请填写用户名和密码'); return; }
+  if (username.length < 2) { showError('用户名至少2个字符'); return; }
+  if (password.length < 4) { showError('密码至少4个字符'); return; }
+
+  const btn = document.getElementById('registerBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span>注册中...';
+
+  try {
+    const res = await fetch(API_BASE + '/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, display_name })
+    });
+    const data = await res.json();
+    if (!res.ok) { showError(data.error || '注册失败'); return; }
+
+    localStorage.setItem('fmea_token', data.token);
+    localStorage.setItem('fmea_user', JSON.stringify(data.user));
+    window.location.replace('/');
+  } catch (e) {
+    showError('网络错误，请重试');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '注 册';
+  }
+}
+
+// 回车提交
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('loginPassword').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doLogin();
+  });
+  document.getElementById('regPassword').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doRegister();
+  });
+});
+
+// 已登录则直接跳转
+const token = localStorage.getItem('fmea_token');
+if (token) {
+  fetch(API_BASE + '/api/auth/me', {
+    headers: { 'Authorization': 'Bearer ' + token }
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.user) window.location.href = '/';
+  })
+  .catch(() => {});
+}
+</script>
+</body>
+</html>

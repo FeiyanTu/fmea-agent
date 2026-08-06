@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="/static/logo.png" />
+<title>团队管理 - FMEA AgentOS</title>
+<style>
+:root {
+  --bg: #f0f2f5; --white: #ffffff; --primary: #2563eb; --primary-light: #dbeafe;
+  --primary-hover: #1d4ed8; --success: #10b981; --success-light: #dcfce7;
+  --warning: #f59e0b; --warning-light: #fef3c7; --danger: #ef4444;
+  --danger-light: #fee2e2; --purple: #7c3aed; --purple-light: #ede9fe;
+  --border: #e2e8f0; --text: #1e293b; --text-secondary: #64748b;
+  --text-muted: #94a3b8; --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow: 0 4px 16px rgba(0,0,0,0.08); --radius: 10px; --radius-sm: 6px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei","PingFang SC",sans-serif;
+  background: var(--bg); min-height: 100vh; color: var(--text);
+}
+.header {
+  background: var(--white); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 32px; height: 60px;
+  gap: 14px; box-shadow: var(--shadow-sm); position: sticky; top: 0; z-index: 100;
+}
+.header-logo {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, #10b981, #34d399);
+  border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  font-size: 17px; color: white; flex-shrink: 0; font-weight: 700;
+}
+.header-title { font-size: 17px; font-weight: 700; color: var(--text); }
+.header-nav { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.nav-btn {
+  padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 500;
+  border: 1px solid var(--border); background: var(--white);
+  color: var(--text-secondary); cursor: pointer; text-decoration: none;
+  transition: all 0.2s;
+}
+.nav-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+.container { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
+.tabs {
+  display: flex; gap: 4px; background: var(--white);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px; margin-bottom: 24px; width: fit-content;
+}
+.tab {
+  padding: 8px 20px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; border: none;
+  background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;
+}
+.tab:hover { color: var(--primary); }
+.tab.active { background: var(--primary); color: white; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.toolbar h2 { font-size: 20px; font-weight: 600; }
+.toolbar-actions { display: flex; gap: 10px; }
+.btn {
+  padding: 8px 20px; border-radius: 8px; font-size: 14px; font-weight: 500;
+  border: none; cursor: pointer; transition: all 0.2s;
+  display: flex; align-items: center; gap: 6px;
+}
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-danger { background: var(--danger); color: white; }
+.btn-danger:hover { opacity: 0.9; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+.help-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--primary); color: #fff;
+  font-size: 11px; font-weight: bold; cursor: pointer;
+  margin-left: 4px; vertical-align: middle;
+}
+.help-icon:hover { opacity: .85; }
+.stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.stat-card {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 20px; text-align: center;
+}
+.stat-card .num { font-size: 28px; font-weight: 700; color: var(--primary); }
+.stat-card .label { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.table-wrapper {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+table { width: 100%; border-collapse: collapse; table-layout: auto; }
+thead th {
+  background: var(--bg); padding: 12px 16px; text-align: left;
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 14px 16px; font-size: 14px;
+  border-bottom: 1px solid var(--border); vertical-align: middle;
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: #f8fafc; }
+.role-badge {
+  display: inline-block; padding: 2px 10px; border-radius: 20px;
+  font-size: 12px; font-weight: 500; background: var(--success-light); color: var(--success);
+  white-space: nowrap;
+}
+.status-badge {
+  display: inline-block; padding: 2px 10px; border-radius: 20px;
+  font-size: 12px; font-weight: 500;
+  white-space: nowrap;
+}
+.status-active { background: var(--success-light); color: var(--success); }
+.status-inactive { background: #f1f5f9; color: var(--text-muted); }
+.action-btn {
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+  color: var(--text-secondary); transition: all 0.2s;
+}
+.action-btn:hover { border-color: var(--danger); color: var(--danger); }
+.action-btn.edit-btn:hover { border-color: var(--primary); color: var(--primary); }
+.modal-overlay {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4); z-index: 200;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--white); border-radius: var(--radius);
+  width: 480px; max-width: 90vw; max-height: 90vh; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15); animation: modalIn 0.2s ease;
+}
+.modal.wide { width: 640px; }
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-header { padding: 20px 24px 0; font-size: 18px; font-weight: 600; }
+.modal-body { padding: 20px 24px; }
+.modal-footer {
+  padding: 0 24px 20px; display: flex; justify-content: flex-end; gap: 10px;
+}
+.form-group { margin-bottom: 16px; }
+.form-group label {
+  display: block; font-size: 13px; font-weight: 500;
+  color: var(--text-secondary); margin-bottom: 6px;
+}
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: inherit;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+  border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light);
+}
+.form-group textarea { resize: vertical; min-height: 60px; }
+.perm-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; max-height: 220px; overflow-y: auto;
+}
+.perm-item {
+  display: flex; align-items: center; gap: 6px; font-size: 13px;
+  color: var(--text); cursor: pointer; user-select: none;
+}
+.perm-item input { width: auto; }
+.empty-state { text-align: center; padding: 48px 24px; color: var(--text-muted); }
+.empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+.empty-state p { font-size: 14px; }
+.toast {
+  position: fixed; top: 20px; right: 20px; background: var(--white);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 20px; box-shadow: var(--shadow); font-size: 14px;
+  z-index: 300; display: none; animation: toastIn 0.3s ease;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.toast.show { display: flex; align-items: center; gap: 8px; }
+.toast.success { border-left: 4px solid var(--success); }
+.toast.error { border-left: 4px solid var(--danger); }
+@media (max-width: 700px) {
+  .header { padding: 0 16px; }
+  .container { padding: 20px 12px; }
+  .stats-bar { grid-template-columns: repeat(2, 1fr); }
+  .toolbar { flex-direction: column; gap: 12px; align-items: stretch; }
+  .perm-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-logo">👥</div>
+  <div class="header-title">团队管理</div>
+  <div class="header-nav"><a href="/" class="nav-btn">← 控制台</a></div>
+</div>
+<div class="container">
+  <div class="tabs">
+    <button class="tab active" data-tab="members" onclick="switchTab('members')">团队成员</button>
+    <button class="tab" data-tab="roles" onclick="switchTab('roles')">角色管理</button>
+  </div>
+  <div id="membersTab">
+    <div class="stats-bar">
+      <div class="stat-card"><div class="num" id="totalCount">0</div><div class="label">总成员</div></div>
+      <div class="stat-card"><div class="num" id="leadCount">0</div><div class="label">负责人</div></div>
+      <div class="stat-card"><div class="num" id="engineerCount">0</div><div class="label">工程师</div></div>
+      <div class="stat-card"><div class="num" id="activeCount">0</div><div class="label">活跃成员</div></div>
+    </div>
+    <div class="toolbar">
+      <h2>团队成员</h2>
+      <div class="toolbar-actions">
+        <input type="text" id="searchInput" placeholder="🔍 搜索姓名/邮箱/部门..." oninput="onSearch()"
+          style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;width:200px">
+        <button class="btn btn-primary" onclick="showMemberModal()">＋ 添加成员</button>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th style="width:100px">姓名</th><th>邮箱</th><th style="width:120px">邮箱授权码</th><th style="width:120px">知识库授权码</th><th style="width:80px">角色</th><th style="width:120px">部门</th><th style="width:80px">状态</th><th style="width:140px">操作</th></tr></thead>
+        <tbody id="memberTableBody"></tbody>
+      </table>
+      <div id="emptyState" class="empty-state" style="display:none"><div class="icon">👥</div><p>暂无团队成员</p></div>
+    </div>
+  </div>
+  <div id="rolesTab" style="display:none">
+    <div class="toolbar">
+      <h2>系统角色</h2>
+      <div class="toolbar-actions"><button class="btn btn-primary" onclick="showRoleModal()">＋ 新建角色</button></div>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th style="width:100px;white-space:nowrap">角色标识</th><th style="white-space:nowrap">角色名称</th><th>描述</th><th>权限</th><th style="width:150px">操作</th></tr></thead>
+        <tbody id="roleTableBody"></tbody>
+      </table>
+      <div id="emptyRoleState" class="empty-state" style="display:none"><div class="icon">🔑</div><p>暂无自定义角色</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="memberModalOverlay">
+  <div class="modal">
+    <div class="modal-header" id="memberModalTitle">添加成员</div>
+    <div class="modal-body">
+      <div class="form-group"><label>姓名 *</label><input type="text" id="memberName" /></div>
+      <div class="form-group"><label>邮箱 *</label><input type="email" id="memberEmail" /></div>
+      <div class="form-group">
+        <label>
+          邮箱授权码
+          <span class="help-icon" onclick="showAuthCodeHelp(event)" title="点击了解如何获取授权码">?</span>
+        </label>
+        <input type="password" id="memberAuthCode" />
+      </div>
+      <div class="form-group">
+        <label>
+          知识库授权码
+          <span class="help-icon" onclick="showKbAuthCodeHelp(event)" title="点击了解如何获取知识库授权码">?</span>
+        </label>
+        <input type="password" id="memberKbAuthCode" />
+      </div>
+      <div class="form-group"><label>角色 *</label><select id="memberRole"></select></div>
+      <div class="form-group"><label>部门</label><input type="text" id="memberDept" /></div>
+      <div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="memberActive" checked style="width:auto"><span>启用</span></label></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMemberModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveMember()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 邮箱授权码帮助弹窗 -->
+<div class="modal-overlay" id="authCodeHelpOverlay" onclick="closeAuthCodeHelp(event)">
+  <div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
+    <div class="modal-header">获取邮箱授权码</div>
+    <div class="modal-body" style="line-height:1.8;font-size:14px">
+      <p><strong>QQ邮箱：</strong></p>
+      <ol style="padding-left:20px;margin:8px 0">
+        <li>登录 <a href="https://mail.qq.com" target="_blank">mail.qq.com</a></li>
+        <li>进入「设置」→「账户」</li>
+        <li>找到「POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务」</li>
+        <li>开启「IMAP/SMTP服务」</li>
+        <li>按提示发送短信，获取授权码</li>
+      </ol>
+      <p><strong>163邮箱：</strong></p>
+      <ol style="padding-left:20px;margin:8px 0">
+        <li>登录 <a href="https://mail.163.com" target="_blank">mail.163.com</a></li>
+        <li>进入「设置」→「POP3/SMTP/IMAP」</li>
+        <li>开启「IMAP/SMTP服务」</li>
+        <li>获取授权码（部分版本需要设置客户端授权密码）</li>
+      </ol>
+      <p style="color:var(--text-secondary);font-size:13px;margin-top:12px">授权码是一串字母和数字，不是邮箱登录密码。</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="document.getElementById('authCodeHelpOverlay').classList.remove('show')">知道了</button>
+    </div>
+  </div>
+</div>
+
+<!-- 知识库授权码帮助弹窗 -->
+<div class="modal-overlay" id="kbAuthCodeHelpOverlay" onclick="closeKbAuthCodeHelp(event)">
+  <div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
+    <div class="modal-header">获取知识库授权码</div>
+    <div class="modal-body" style="line-height:1.8;font-size:14px">
+      <p><strong>登录 WeKnora 知识库：</strong></p>
+      <ol style="padding-left:20px;margin:8px 0">
+        <li>访问 <a href="http://10.180.17.11:81" target="_blank">http://10.180.17.11:81</a></li>
+        <li>使用你的账号登录</li>
+        <li>进入「账户信息」页面</li>
+        <li>复制 <code style="background:var(--bg);padding:1px 6px;border-radius:3px">X-API-Key</code> 字段</li>
+        <li>粘贴到此处</li>
+      </ol>
+      <p><strong>联系管理员获取：</strong></p>
+      <p style="color:var(--text-secondary);font-size:13px">如果没有账号，请联系系统管理员为你开通 WeKnora 知识库账号并获取 API Key。</p>
+      <p style="color:var(--text-secondary);font-size:13px;margin-top:12px">授权码形如 <code>sk-xxxxx</code>，用于调用知识库检索接口。</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="document.getElementById('kbAuthCodeHelpOverlay').classList.remove('show')">知道了</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="roleModalOverlay">
+  <div class="modal wide">
+    <div class="modal-header" id="roleModalTitle">新建角色</div>
+    <div class="modal-body">
+      <div class="form-group"><label>角色标识 * <span style="color:var(--text-muted);font-weight:normal">（英文，例：quality）</span></label><input type="text" id="roleCode" /></div>
+      <div class="form-group"><label>角色名称 *</label><input type="text" id="roleName" /></div>
+      <div class="form-group"><label>描述</label><textarea id="roleDescription"></textarea></div>
+      <div class="form-group"><label>权限</label><div class="perm-grid" id="permGrid"></div></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeRoleModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveRole()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+const API_BASE = window.location.origin;
+let AUTH_TOKEN = localStorage.getItem('fmea_token');
+let AUTH_USER = (() => { try { return JSON.parse(localStorage.getItem('fmea_user')); } catch(e) { return null; } })();
+
+function getAuthHeaders() {
+  return AUTH_TOKEN ? { 'Authorization': 'Bearer ' + AUTH_TOKEN, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+}
+function getAuthFetch(url, options = {}) {
+  const h = getAuthHeaders();
+  if (options.headers) Object.assign(h, options.headers);
+  return fetch(url, { ...options, headers: h });
+}
+
+// Auth guard
+(function() {
+  if (!AUTH_TOKEN) { window.location.href = '/login'; return; }
+  if (AUTH_USER && AUTH_USER.role !== 'admin') { window.location.href = '/'; return; }
+  fetch(API_BASE + '/api/auth/me', { headers: { Authorization: 'Bearer ' + AUTH_TOKEN } })
+    .then(r => r.json())
+    .then(d => { if (!d.user || d.user.role !== 'admin') window.location.href = '/'; })
+    .catch(() => {});
+})();
+
+let members = [], roles = [], allPermissions = [];
+let editMemberId = null, editRoleId = null;
+let searchKeyword = '';
+
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = ' ' + msg;
+  el.className = 'toast show ' + type;
+  setTimeout(() => { el.className = 'toast'; }, 2500);
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.getElementById('membersTab').style.display = (name === 'members') ? '' : 'none';
+  document.getElementById('rolesTab').style.display = (name === 'roles') ? '' : 'none';
+  if (name === 'roles') loadRoles();
+}
+
+function roleCodeToName(code) {
+  const r = roles.find(x => x.code === code);
+  return r ? r.name : code;
+}
+
+// ── Members ──
+async function loadMembers() {
+  try { const r = await getAuthFetch(API_BASE + '/api/team/members'); members = await r.json(); }
+  catch (e) { members = []; }
+  renderMembers();
+}
+
+function renderMembers() {
+  const tbody = document.getElementById('memberTableBody');
+  const empty = document.getElementById('emptyState');
+  const filtered = getFilteredMembers();
+  if (filtered.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    empty.innerHTML = searchKeyword
+      ? '<div class="icon">🔍</div><p>未找到匹配的成员</p>'
+      : '<div class="icon">👥</div><p>暂无团队成员，点击「添加成员」开始组建</p>';
+  } else {
+    empty.style.display = 'none';
+    tbody.innerHTML = filtered.map(m => {
+      return '<tr><td><strong>' + esc(m.name) + '</strong></td>'
+        + '<td style="color:var(--text-secondary)">' + esc(m.email || '-') + '</td>'
+        + '<td style="color:var(--text-secondary);font-family:monospace;font-size:12px">' + (m.email_auth_code ? '••••' + esc(m.email_auth_code.slice(-4)) : '-') + '</td>'
+        + '<td style="color:var(--text-secondary);font-family:monospace;font-size:12px" title="知识库授权码">' + (m.kb_auth_code ? '••••' + esc(m.kb_auth_code.slice(-4)) : '-') + '</td>'
+        + '<td><span class="role-badge">' + esc(m.role_name || m.role_code) + '</span></td>'
+        + '<td style="color:var(--text-secondary)">' + esc(m.dept || '-') + '</td>'
+        + '<td><span class="status-badge ' + (m.active ? 'status-active' : 'status-inactive') + '">' + (m.active ? '活跃' : '停用') + '</span></td>'
+        + '<td style="white-space:nowrap">'
+        + '<button class="action-btn edit-btn" onclick="showEditMemberModal(' + m.id + ')">编辑</button> '
+        + '<button class="action-btn" onclick="toggleMember(' + m.id + ')">' + (m.active ? '停用' : '启用') + '</button> '
+        + '<button class="action-btn" onclick="deleteMember(' + m.id + ')" style="margin-left:4px">删除</button>'
+        + '</td></tr>';
+    }).join('');
+  }
+  document.getElementById('totalCount').textContent = searchKeyword ? filtered.length + '/' + members.length : members.length;
+  document.getElementById('leadCount').textContent = members.filter(m => m.role_code === 'leader').length;
+  document.getElementById('engineerCount').textContent = members.filter(m => m.role_code === 'engineer').length;
+  document.getElementById('activeCount').textContent = members.filter(m => m.active).length;
+}
+
+function onSearch() {
+  searchKeyword = document.getElementById('searchInput').value.trim().toLowerCase();
+  renderMembers();
+}
+function getFilteredMembers() {
+  if (!searchKeyword) return members;
+  return members.filter(m =>
+    m.name.toLowerCase().includes(searchKeyword) ||
+    (m.email && m.email.toLowerCase().includes(searchKeyword)) ||
+    (m.dept && m.dept.toLowerCase().includes(searchKeyword))
+  );
+}
+
+function refreshRoleSelect() {
+  document.getElementById('memberRole').innerHTML =
+    roles.map(r => '<option value="' + esc(r.code) + '">' + esc(r.name) + '</option>').join('');
+}
+
+function showMemberModal() {
+  editMemberId = null;
+  document.getElementById('memberModalTitle').textContent = '添加成员';
+  ['memberName','memberEmail','memberAuthCode','memberKbAuthCode','memberDept'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('memberActive').checked = true;
+  refreshRoleSelect();
+  document.getElementById('memberModalOverlay').classList.add('show');
+}
+function closeMemberModal() { document.getElementById('memberModalOverlay').classList.remove('show'); }
+
+function showAuthCodeHelp(event) {
+  event.stopPropagation();
+  document.getElementById('authCodeHelpOverlay').classList.add('show');
+}
+function closeAuthCodeHelp(event) {
+  if (event.target === event.currentTarget)
+    document.getElementById('authCodeHelpOverlay').classList.remove('show');
+}
+function showKbAuthCodeHelp(event) {
+  event.stopPropagation();
+  document.getElementById('kbAuthCodeHelpOverlay').classList.add('show');
+}
+function closeKbAuthCodeHelp(event) {
+  if (event.target === event.currentTarget)
+    document.getElementById('kbAuthCodeHelpOverlay').classList.remove('show');
+}
+
+async function saveMember() {
+  const name = document.getElementById('memberName').value.trim();
+  const email = document.getElementById('memberEmail').value.trim();
+  const email_auth_code = document.getElementById('memberAuthCode').value.trim();
+  const kb_auth_code = document.getElementById('memberKbAuthCode').value.trim();
+  const role_code = document.getElementById('memberRole').value;
+  const dept = document.getElementById('memberDept').value.trim();
+  const active = document.getElementById('memberActive').checked;
+  if (!name) { showToast('请输入成员姓名', 'error'); return; }
+  if (!email) { showToast('请输入邮箱', 'error'); return; }
+  if (!role_code) { showToast('请选择角色', 'error'); return; }
+  if (role_code === 'leader' && !email_auth_code) { showToast('项目负责人必须填写邮箱授权码', 'error'); return; }
+  if (role_code === 'leader' && !kb_auth_code) { showToast('项目负责人必须填写知识库授权码', 'error'); return; }
+  try {
+    let resp;
+    if (editMemberId !== null) {
+      const body = { name, email, role_code, dept, active };
+      if (email_auth_code) body.email_auth_code = email_auth_code;
+      if (kb_auth_code) body.kb_auth_code = kb_auth_code;
+      resp = await getAuthFetch(API_BASE + '/api/team/members/' + editMemberId, { method: 'PUT', body: JSON.stringify(body) });
+    } else {
+      resp = await getAuthFetch(API_BASE + '/api/team/members', { method: 'POST', body: JSON.stringify({ name, email, email_auth_code, kb_auth_code, role_code, dept, active }) });
+    }
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); showToast('保存失败: ' + (e.error || resp.status), 'error'); return; }
+    closeMemberModal();
+    showToast(editMemberId !== null ? '成员信息已更新' : '成员已添加', 'success');
+    editMemberId = null;
+    loadMembers();
+  } catch (e) { showToast('网络错误: ' + e.message, 'error'); }
+}
+
+function showEditMemberModal(id) {
+  const m = members.find(x => x.id === id);
+  if (!m) return;
+  editMemberId = id;
+  document.getElementById('memberModalTitle').textContent = '编辑成员';
+  document.getElementById('memberName').value = m.name || '';
+  document.getElementById('memberEmail').value = m.email || '';
+  document.getElementById('memberAuthCode').value = '';
+  refreshRoleSelect();
+  document.getElementById('memberRole').value = m.role_code;
+  document.getElementById('memberDept').value = m.dept || '';
+  document.getElementById('memberActive').checked = m.active;
+  document.getElementById('memberModalOverlay').classList.add('show');
+}
+
+async function toggleMember(id) {
+  const m = members.find(x => x.id === id);
+  if (!m) return;
+  try {
+    const r = await getAuthFetch(API_BASE + '/api/team/members/' + id, { method: 'PUT', body: JSON.stringify({ active: !m.active }) });
+    if (r.ok) { m.active = !m.active; renderMembers(); showToast(m.active ? '成员已启用' : '成员已停用', 'success'); }
+    else showToast('操作失败', 'error');
+  } catch (e) { showToast('网络错误', 'error'); }
+}
+
+async function deleteMember(id) {
+  if (!confirm('确定要删除此成员吗？')) return;
+  try {
+    const r = await getAuthFetch(API_BASE + '/api/team/members/' + id, { method: 'DELETE' });
+    if (r.ok) { showToast('成员已删除', 'success'); loadMembers(); }
+    else { const e = await r.json().catch(() => ({})); showToast('删除失败: ' + (e.error || ''), 'error'); }
+  } catch (e) { showToast('网络错误', 'error'); }
+}
+
+// ── Roles ──
+async function loadRoles() {
+  try {
+    const [rRoles, rPerms] = await Promise.all([
+      getAuthFetch(API_BASE + '/api/roles'),
+      getAuthFetch(API_BASE + '/api/permissions')
+    ]);
+    roles = await rRoles.json();
+    allPermissions = await rPerms.json();
+  } catch (e) { roles = []; allPermissions = []; }
+  renderRoles();
+}
+
+function renderRoles() {
+  const tbody = document.getElementById('roleTableBody');
+  const empty = document.getElementById('emptyRoleState');
+  if (!roles.length) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = roles.map(r => {
+    const perms = (r.permissions || []).map(p =>
+      p === '*'
+        ? '<span class="role-badge" style="background:var(--purple-light);color:var(--purple)">所有权限</span>'
+        : '<span class="role-badge" style="background:var(--primary-light);color:var(--primary);margin-right:4px;margin-bottom:2px;display:inline-block">' + esc(p) + '</span>'
+    ).join('');
+    const isBuiltin = ['admin','leader','engineer','reviewer','manager'].indexOf(r.code) >= 0;
+    return '<tr>'
+      + '<td style="white-space:nowrap"><code style="background:var(--bg);padding:2px 8px;border-radius:4px;font-size:12px">' + esc(r.code) + '</code></td>'
+      + '<td style="white-space:nowrap"><strong>' + esc(r.name) + '</strong>' + (isBuiltin ? ' <span style="font-size:10px;color:var(--text-muted);background:var(--bg);padding:1px 6px;border-radius:8px;margin-left:4px">内置</span>' : '') + '</td>'
+      + '<td style="color:var(--text-secondary);font-size:13px">' + esc(r.description || '-') + '</td>'
+      + '<td>' + perms + '</td>'
+      + '<td style="white-space:nowrap">'
+      + '<button class="action-btn edit-btn" onclick="showEditRoleModal(' + r.id + ')">编辑</button> '
+      + '<button class="action-btn" onclick="deleteRole(' + r.id + ')"' + (isBuiltin ? ' disabled style="opacity:0.4;cursor:not-allowed;margin-left:4px"' : ' style="margin-left:4px"') + '>删除</button>'
+      + '</td></tr>';
+  }).join('');
+}
+
+function renderPermGrid(selectedPerms) {
+  const grid = document.getElementById('permGrid');
+  const isAll = selectedPerms && selectedPerms.includes('*');
+  const items = allPermissions.map(p =>
+    '<label class="perm-item"><input type="checkbox" value="' + esc(p) + '"' + (selectedPerms && selectedPerms.includes(p) ? ' checked' : '') + '><span>' + esc(p) + '</span></label>'
+  ).join('');
+  grid.innerHTML = '<label class="perm-item" style="grid-column:1/-1;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:4px"><input type="checkbox" id="permAll"' + (isAll ? ' checked' : '') + '><strong>所有权限 (admin)</strong></label>' + items;
+}
+
+function showRoleModal() {
+  editRoleId = null;
+  document.getElementById('roleModalTitle').textContent = '新建角色';
+  document.getElementById('roleCode').value = '';
+  document.getElementById('roleCode').disabled = false;
+  document.getElementById('roleName').value = '';
+  document.getElementById('roleDescription').value = '';
+  renderPermGrid([]);
+  document.getElementById('roleModalOverlay').classList.add('show');
+}
+
+function showEditRoleModal(id) {
+  const r = roles.find(x => x.id === id);
+  if (!r) return;
+  editRoleId = id;
+  document.getElementById('roleModalTitle').textContent = '编辑角色 — ' + r.name;
+  document.getElementById('roleCode').value = r.code;
+  document.getElementById('roleCode').disabled = true;
+  document.getElementById('roleName').value = r.name;
+  document.getElementById('roleDescription').value = r.description || '';
+  renderPermGrid(r.permissions || []);
+  document.getElementById('roleModalOverlay').classList.add('show');
+}
+
+function closeRoleModal() { document.getElementById('roleModalOverlay').classList.remove('show'); }
+
+async function saveRole() {
+  const code = document.getElementById('roleCode').value.trim();
+  const name = document.getElementById('roleName').value.trim();
+  const description = document.getElementById('roleDescription').value.trim();
+  const isAll = document.getElementById('permAll').checked;
+  const permCheckboxes = document.querySelectorAll('#permGrid .perm-item input[type=checkbox]:not(#permAll)');
+  const permissions = isAll ? ['*'] : Array.from(permCheckboxes).filter(c => c.checked).map(c => c.value);
+  if (!code || !name) { showToast('角色标识和名称不能为空', 'error'); return; }
+  try {
+    let r;
+    if (editRoleId !== null) {
+      r = await getAuthFetch(API_BASE + '/api/roles/' + editRoleId, { method: 'PUT', body: JSON.stringify({ name, description, permissions }) });
+    } else {
+      r = await getAuthFetch(API_BASE + '/api/roles', { method: 'POST', body: JSON.stringify({ code, name, description, permissions }) });
+    }
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      showToast('保存失败: ' + (e.error || r.status), 'error');
+      return;
+    }
+    closeRoleModal();
+    showToast(editRoleId !== null ? '角色已更新' : '角色已创建', 'success');
+    editRoleId = null;
+    loadRoles();
+  } catch (e) { showToast('网络错误', 'error'); }
+}
+
+async function deleteRole(id) {
+  const r = roles.find(x => x.id === id);
+  if (!r) return;
+  if (!confirm('确定删除角色 "' + r.name + '" 吗？')) return;
+  try {
+    const resp = await getAuthFetch(API_BASE + '/api/roles/' + id, { method: 'DELETE' });
+    if (resp.ok) { showToast('角色已删除', 'success'); loadRoles(); }
+    else { const e = await resp.json().catch(() => ({})); showToast('删除失败: ' + (e.error || ''), 'error'); }
+  } catch (e) { showToast('网络错误', 'error'); }
+}
+
+document.getElementById('memberModalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeMemberModal();
+});
+document.getElementById('roleModalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeRoleModal();
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('searchInput');
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSearch(); });
+});
+
+(async function init() {
+  await loadRoles();
+  await loadMembers();
+})();
+</script>
+</body>
+</html>
