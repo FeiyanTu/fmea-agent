@@ -8,8 +8,8 @@ sys.path.insert(0, str(PROJECT_DIR))
 from dotenv import load_dotenv
 load_dotenv(str(PROJECT_DIR / ".env"))
 
-HOST = os.getenv("URL_AGENT_DB_HOST", "10.180.17.11")
-PORT = int(os.getenv("URL_AGENT_DB_PORT", "5433"))
+HOST = os.getenv("URL_AGENT_DB_HOST", "122.51.85.245")
+PORT = int(os.getenv("URL_AGENT_DB_PORT", "5432"))
 DB = os.getenv("URL_AGENT_DB_NAME", "fmea")
 USER = os.getenv("URL_AGENT_DB_USER", "postgres")
 PWD = os.getenv("URL_AGENT_DB_PASSWORD", "postgres123!@#")

@@ -85,21 +85,34 @@ body {
 .stat-card .label { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .table-wrapper {
   background: var(--white); border: 1px solid var(--border);
-  border-radius: var(--radius); overflow: hidden;
+  border-radius: var(--radius);
+  /* v24.4: 原来这里是 overflow:hidden —— 配合单元格 nowrap，表格一超宽最右边的
+     「删除」按钮就被直接裁掉且无法滚动到。改成横向可滚动，兜住所有窄屏情况。 */
+  overflow-x: auto; overflow-y: hidden;
 }
-table { width: 100%; border-collapse: collapse; table-layout: auto; }
+table { width: 100%; min-width: 1040px; border-collapse: collapse; table-layout: auto; }
 thead th {
-  background: var(--bg); padding: 12px 16px; text-align: left;
+  background: var(--bg); padding: 12px 12px; text-align: left;
   font-size: 12px; font-weight: 600; color: var(--text-secondary);
   text-transform: uppercase; letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 tbody td {
-  padding: 14px 16px; font-size: 14px;
+  padding: 14px 12px; font-size: 14px;
   border-bottom: 1px solid var(--border); vertical-align: middle;
   white-space: nowrap;
 }
+/* v24.4: 操作列吸右边 —— 表格横向滚动时始终可见，不会再"看不到删除按钮" */
+thead th:last-child, tbody td:last-child {
+  position: sticky; right: 0; z-index: 2;
+  background: var(--white);
+  box-shadow: -8px 0 8px -8px rgba(15,23,42,0.18);
+}
+thead th:last-child { background: var(--bg); }
+tbody tr:hover td:last-child { background: #f8fafc; }
+/* 操作列里的按钮组：用 flex + gap 保证间距一致，且不会被挤成两行 */
+.row-actions { display: flex; align-items: center; gap: 6px; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: #f8fafc; }
 .role-badge {
@@ -116,11 +129,21 @@ tbody tr:hover { background: #f8fafc; }
 .status-inactive { background: #f1f5f9; color: var(--text-muted); }
 .action-btn {
   background: none; border: 1px solid var(--border); border-radius: 6px;
-  padding: 4px 10px; font-size: 12px; cursor: pointer;
-  color: var(--text-secondary); transition: all 0.2s;
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+  color: var(--text-secondary); transition: all 0.2s; white-space: nowrap;
 }
 .action-btn:hover { border-color: var(--danger); color: var(--danger); }
 .action-btn.edit-btn:hover { border-color: var(--primary); color: var(--primary); }
+/* 弹窗里的提示块（如"初始密码是多少"） */
+.modal-note {
+  font-size: 12px; line-height: 1.75; color: var(--text-secondary);
+  background: var(--warning-light); border: 1px solid #fde68a;
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.modal-note code {
+  background: var(--primary-light); color: var(--primary-hover);
+  padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 12px;
+}
 .modal-overlay {
   display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.4); z-index: 200;
@@ -218,7 +241,7 @@ tbody tr:hover { background: #f8fafc; }
     </div>
     <div class="table-wrapper">
       <table>
-        <thead><tr><th style="width:100px">姓名</th><th>邮箱</th><th style="width:120px">邮箱授权码</th><th style="width:120px">知识库授权码</th><th style="width:80px">角色</th><th style="width:120px">部门</th><th style="width:80px">状态</th><th style="width:140px">操作</th></tr></thead>
+        <thead><tr><th style="width:92px">姓名</th><th style="width:208px">邮箱</th><th style="width:104px">知识库授权码</th><th style="width:90px">角色</th><th style="width:100px">部门</th><th style="width:74px">状态</th><th style="width:168px">操作</th></tr></thead>
         <tbody id="memberTableBody"></tbody>
       </table>
       <div id="emptyState" class="empty-state" style="display:none"><div class="icon">👥</div><p>暂无团队成员</p></div>
@@ -247,13 +270,6 @@ tbody tr:hover { background: #f8fafc; }
       <div class="form-group"><label>邮箱 *</label><input type="email" id="memberEmail" /></div>
       <div class="form-group">
         <label>
-          邮箱授权码
-          <span class="help-icon" onclick="showAuthCodeHelp(event)" title="点击了解如何获取授权码">?</span>
-        </label>
-        <input type="password" id="memberAuthCode" />
-      </div>
-      <div class="form-group">
-        <label>
           知识库授权码
           <span class="help-icon" onclick="showKbAuthCodeHelp(event)" title="点击了解如何获取知识库授权码">?</span>
         </label>
@@ -261,39 +277,16 @@ tbody tr:hover { background: #f8fafc; }
       </div>
       <div class="form-group"><label>角色 *</label><select id="memberRole"></select></div>
       <div class="form-group"><label>部门</label><input type="text" id="memberDept" /></div>
-      <div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="memberActive" checked style="width:auto"><span>启用</span></label></div>
+      <div class="form-group" style="margin-bottom:12px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="memberActive" checked style="width:auto"><span>启用</span></label></div>
+      <!-- v24.4: 只在「添加成员」时显示初始密码说明（编辑成员不会重置密码，见 showEditMemberModal） -->
+      <div id="memberPwNote" class="modal-note">
+        保存后该成员的登录密码为初始密码 <code>fmea123</code>。<br />
+        请把<b>邮箱</b>与初始密码转告本人，并提醒其登录后尽快修改。
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeMemberModal()">取消</button>
       <button class="btn btn-primary" onclick="saveMember()">保存</button>
-    </div>
-  </div>
-</div>
-
-<!-- 邮箱授权码帮助弹窗 -->
-<div class="modal-overlay" id="authCodeHelpOverlay" onclick="closeAuthCodeHelp(event)">
-  <div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
-    <div class="modal-header">获取邮箱授权码</div>
-    <div class="modal-body" style="line-height:1.8;font-size:14px">
-      <p><strong>QQ邮箱：</strong></p>
-      <ol style="padding-left:20px;margin:8px 0">
-        <li>登录 <a href="https://mail.qq.com" target="_blank">mail.qq.com</a></li>
-        <li>进入「设置」→「账户」</li>
-        <li>找到「POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务」</li>
-        <li>开启「IMAP/SMTP服务」</li>
-        <li>按提示发送短信，获取授权码</li>
-      </ol>
-      <p><strong>163邮箱：</strong></p>
-      <ol style="padding-left:20px;margin:8px 0">
-        <li>登录 <a href="https://mail.163.com" target="_blank">mail.163.com</a></li>
-        <li>进入「设置」→「POP3/SMTP/IMAP」</li>
-        <li>开启「IMAP/SMTP服务」</li>
-        <li>获取授权码（部分版本需要设置客户端授权密码）</li>
-      </ol>
-      <p style="color:var(--text-secondary);font-size:13px;margin-top:12px">授权码是一串字母和数字，不是邮箱登录密码。</p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-primary" onclick="document.getElementById('authCodeHelpOverlay').classList.remove('show')">知道了</button>
     </div>
   </div>
 </div>
@@ -371,11 +364,12 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
-function showToast(msg, type) {
+// v24.3: 加可选 duration —— 展示登录名/初始密码这类需要抄写的信息时，2.5 秒不够
+function showToast(msg, type, duration = 2500) {
   const el = document.getElementById('toast');
   el.textContent = ' ' + msg;
   el.className = 'toast show ' + type;
-  setTimeout(() => { el.className = 'toast'; }, 2500);
+  setTimeout(() => { el.className = 'toast'; }, duration);
 }
 
 function switchTab(name) {
@@ -411,16 +405,18 @@ function renderMembers() {
     empty.style.display = 'none';
     tbody.innerHTML = filtered.map(m => {
       return '<tr><td><strong>' + esc(m.name) + '</strong></td>'
-        + '<td style="color:var(--text-secondary)">' + esc(m.email || '-') + '</td>'
-        + '<td style="color:var(--text-secondary);font-family:monospace;font-size:12px">' + (m.email_auth_code ? '••••' + esc(m.email_auth_code.slice(-4)) : '-') + '</td>'
+        // 邮箱列限宽 + 省略号：超长邮箱（如 paperhelper_test@test.com）不再把整张表撑宽
+        + '<td style="color:var(--text-secondary)"><div style="max-width:190px;overflow:hidden;text-overflow:ellipsis" title="' + esc(m.email || '') + '">' + esc(m.email || '-') + '</div></td>'
         + '<td style="color:var(--text-secondary);font-family:monospace;font-size:12px" title="知识库授权码">' + (m.kb_auth_code ? '••••' + esc(m.kb_auth_code.slice(-4)) : '-') + '</td>'
         + '<td><span class="role-badge">' + esc(m.role_name || m.role_code) + '</span></td>'
         + '<td style="color:var(--text-secondary)">' + esc(m.dept || '-') + '</td>'
         + '<td><span class="status-badge ' + (m.active ? 'status-active' : 'status-inactive') + '">' + (m.active ? '活跃' : '停用') + '</span></td>'
-        + '<td style="white-space:nowrap">'
-        + '<button class="action-btn edit-btn" onclick="showEditMemberModal(' + m.id + ')">编辑</button> '
-        + '<button class="action-btn" onclick="toggleMember(' + m.id + ')">' + (m.active ? '停用' : '启用') + '</button> '
-        + '<button class="action-btn" onclick="deleteMember(' + m.id + ')" style="margin-left:4px">删除</button>'
+        + '<td>'
+        + '<div class="row-actions">'
+        + '<button class="action-btn edit-btn" onclick="showEditMemberModal(' + m.id + ')">编辑</button>'
+        + '<button class="action-btn" onclick="toggleMember(' + m.id + ')">' + (m.active ? '停用' : '启用') + '</button>'
+        + '<button class="action-btn" onclick="deleteMember(' + m.id + ')">删除</button>'
+        + '</div>'
         + '</td></tr>';
     }).join('');
   }
@@ -451,21 +447,16 @@ function refreshRoleSelect() {
 function showMemberModal() {
   editMemberId = null;
   document.getElementById('memberModalTitle').textContent = '添加成员';
-  ['memberName','memberEmail','memberAuthCode','memberKbAuthCode','memberDept'].forEach(id => document.getElementById(id).value = '');
+  ['memberName','memberEmail','memberKbAuthCode','memberDept'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('memberActive').checked = true;
+  // 添加时会设初始密码 —— 显示说明
+  const pwNote = document.getElementById('memberPwNote');
+  if (pwNote) pwNote.style.display = '';
   refreshRoleSelect();
   document.getElementById('memberModalOverlay').classList.add('show');
 }
 function closeMemberModal() { document.getElementById('memberModalOverlay').classList.remove('show'); }
 
-function showAuthCodeHelp(event) {
-  event.stopPropagation();
-  document.getElementById('authCodeHelpOverlay').classList.add('show');
-}
-function closeAuthCodeHelp(event) {
-  if (event.target === event.currentTarget)
-    document.getElementById('authCodeHelpOverlay').classList.remove('show');
-}
 function showKbAuthCodeHelp(event) {
   event.stopPropagation();
   document.getElementById('kbAuthCodeHelpOverlay').classList.add('show');
@@ -478,7 +469,6 @@ function closeKbAuthCodeHelp(event) {
 async function saveMember() {
   const name = document.getElementById('memberName').value.trim();
   const email = document.getElementById('memberEmail').value.trim();
-  const email_auth_code = document.getElementById('memberAuthCode').value.trim();
   const kb_auth_code = document.getElementById('memberKbAuthCode').value.trim();
   const role_code = document.getElementById('memberRole').value;
   const dept = document.getElementById('memberDept').value.trim();
@@ -486,21 +476,30 @@ async function saveMember() {
   if (!name) { showToast('请输入成员姓名', 'error'); return; }
   if (!email) { showToast('请输入邮箱', 'error'); return; }
   if (!role_code) { showToast('请选择角色', 'error'); return; }
-  if (role_code === 'leader' && !email_auth_code) { showToast('项目负责人必须填写邮箱授权码', 'error'); return; }
   if (role_code === 'leader' && !kb_auth_code) { showToast('项目负责人必须填写知识库授权码', 'error'); return; }
   try {
     let resp;
     if (editMemberId !== null) {
       const body = { name, email, role_code, dept, active };
-      if (email_auth_code) body.email_auth_code = email_auth_code;
       if (kb_auth_code) body.kb_auth_code = kb_auth_code;
       resp = await getAuthFetch(API_BASE + '/api/team/members/' + editMemberId, { method: 'PUT', body: JSON.stringify(body) });
     } else {
-      resp = await getAuthFetch(API_BASE + '/api/team/members', { method: 'POST', body: JSON.stringify({ name, email, email_auth_code, kb_auth_code, role_code, dept, active }) });
+      resp = await getAuthFetch(API_BASE + '/api/team/members', { method: 'POST', body: JSON.stringify({ name, email, kb_auth_code, role_code, dept, active }) });
     }
+    const wasEdit = editMemberId !== null;
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); showToast('保存失败: ' + (e.error || resp.status), 'error'); return; }
+    const saved = await resp.json().catch(() => ({}));
     closeMemberModal();
-    showToast(editMemberId !== null ? '成员信息已更新' : '成员已添加', 'success');
+    if (wasEdit) {
+      showToast('成员信息已更新', 'success');
+    } else {
+      // v24.3: 明确告知管理员「登录名 + 初始密码」，否则成员根本不知道该怎么登录
+      //   （登录用邮箱或用户名；初始密码由后端返回）
+      showToast(
+        `成员已添加：登录名 ${saved.username || '-'} / 初始密码 ${saved.default_password || '-'}（请转告本人，登录后尽快修改）`,
+        'success', 12000
+      );
+    }
     editMemberId = null;
     loadMembers();
   } catch (e) { showToast('网络错误: ' + e.message, 'error'); }
@@ -513,11 +512,13 @@ function showEditMemberModal(id) {
   document.getElementById('memberModalTitle').textContent = '编辑成员';
   document.getElementById('memberName').value = m.name || '';
   document.getElementById('memberEmail').value = m.email || '';
-  document.getElementById('memberAuthCode').value = '';
   refreshRoleSelect();
   document.getElementById('memberRole').value = m.role_code;
   document.getElementById('memberDept').value = m.dept || '';
   document.getElementById('memberActive').checked = m.active;
+  // 编辑不涉及密码，隐藏初始密码说明（v24.4）
+  const pwNote = document.getElementById('memberPwNote');
+  if (pwNote) pwNote.style.display = 'none';
   document.getElementById('memberModalOverlay').classList.add('show');
 }
 
@@ -574,9 +575,11 @@ function renderRoles() {
       + '<td style="white-space:nowrap"><strong>' + esc(r.name) + '</strong>' + (isBuiltin ? ' <span style="font-size:10px;color:var(--text-muted);background:var(--bg);padding:1px 6px;border-radius:8px;margin-left:4px">内置</span>' : '') + '</td>'
       + '<td style="color:var(--text-secondary);font-size:13px">' + esc(r.description || '-') + '</td>'
       + '<td>' + perms + '</td>'
-      + '<td style="white-space:nowrap">'
-      + '<button class="action-btn edit-btn" onclick="showEditRoleModal(' + r.id + ')">编辑</button> '
-      + '<button class="action-btn" onclick="deleteRole(' + r.id + ')"' + (isBuiltin ? ' disabled style="opacity:0.4;cursor:not-allowed;margin-left:4px"' : ' style="margin-left:4px"') + '>删除</button>'
+      + '<td>'
+      + '<div class="row-actions">'
+      + '<button class="action-btn edit-btn" onclick="showEditRoleModal(' + r.id + ')">编辑</button>'
+      + '<button class="action-btn" onclick="deleteRole(' + r.id + ')"' + (isBuiltin ? ' disabled style="opacity:0.4;cursor:not-allowed"' : '') + '>删除</button>'
+      + '</div>'
       + '</td></tr>';
   }).join('');
 }

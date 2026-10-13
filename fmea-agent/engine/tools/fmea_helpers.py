@@ -25,6 +25,23 @@ from main import get_user_db_conn
 logger = logging.getLogger(__name__)
 
 
+def sanitize_for_pg(obj: Any) -> Any:
+    """递归清洗即将写入 PG 的 JSON 数据。
+
+    PostgreSQL text 类型禁止 NUL 字符（\\u0000），乱码替换符 U+FFFD（\\ufffd）
+    是解码失败的标志（如 Excel/PDF 里的非 UTF-8 字节）。统一在写库前清洗，
+    保证任何来源（LLM 输出 / Excel 解析 / PDF 提取）的数据都能入库。
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_for_pg(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_for_pg(v) for v in obj]
+    if isinstance(obj, str):
+        # \x00 = NUL（PG 硬性禁止）；\ufffd = 乱码替换符，换成 ? 保留可读性
+        return obj.replace("\x00", "").replace("\ufffd", "?")
+    return obj
+
+
 def resolve_project_id_to_db_pid(project_name: str) -> Optional[int]:
     """将字符串 project_id (目录名/项目名/DB id) 解析为 projects 表的整数 ID.
 
@@ -114,7 +131,9 @@ def merge_assignee_data(rows_data: List[dict], key: str = "id") -> dict:
         for item in baseline_items:
             item_key = item.get(key)
             # node_id 在用户显式删除列表中 → 跳过（被删除）
-            if field == 'items' and item_key in deleted_node_ids:
+            # 注意：nodes（结构树）和 items（失效/风险等）都需要应用删除列表，
+            # 否则画布删除的节点在 merge 时又从 baseline 复活
+            if field in ('items', 'nodes') and item_key in deleted_node_ids:
                 continue
             if item_key:
                 merged_items[item_key] = item
@@ -267,6 +286,8 @@ def save_assignee_data(
         return filtered
 
     try:
+        # 写库前统一清洗（去 \x00 / \ufffd），防止 PG 拒绝非法字符
+        new_data = sanitize_for_pg(new_data)
         with get_user_db_conn() as conn:
             with conn.cursor() as cur:
                 # 1. 锁基线行
@@ -297,6 +318,8 @@ def save_assignee_data(
                     merged = merge_assignee_data([baseline_data, filtered_data], key=effective_key)
                 else:
                     merged = new_data
+                # 防历史基线里残留的脏字符被合并进来
+                merged = sanitize_for_pg(merged)
 
                 # 3. 更新基线行（UPSERT）
                 cur.execute(
@@ -360,7 +383,8 @@ def upsert_baseline(project_id: int, step_name: str, data: dict) -> bool:
                     "VALUES (%s, %s, -1, %s) "
                     "ON CONFLICT (project_id, step_name, assignee_user_id) "
                     "DO UPDATE SET data = %s, version = fmea_step_assignee_data.version + 1, updated_at = NOW()",
-                    (project_id, step_name, json.dumps(data), json.dumps(data)),
+                    (project_id, step_name,
+                     json.dumps(sanitize_for_pg(data)), json.dumps(sanitize_for_pg(data))),
                 )
             conn.commit()
         return True

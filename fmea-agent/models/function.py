@@ -57,6 +57,32 @@ class FunctionDetail(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class InterfaceRelation(BaseModel):
+    """零部件之间的界面关系（v26 内部载体）
+
+    分析阶段由各专业 Agent 产出，后处理时**转换为一条 FunctionDetail**（功能）追加到
+    主要归属零部件的 functions 列表中 —— 界面就是一种功能，走既有的功能表/推送/
+    失效分析链路，不引入独立的表结构。
+
+    归属原则：界面关系归属于占主要部分的零部件（primary_owner_node_id），
+    由 LLM 结合工程语义与知识库依据判定，并给出 attribution_reason。
+    """
+    interface_id: str = ""
+    node_id: str = ""                      # 当前挂载的节点（通常为主要归属方）
+    node_name: str = ""                    # 当前挂载的节点名称
+    counterpart_node_id: str = ""          # 界面对端零部件 ID
+    counterpart_node_name: str = ""        # 界面对端零部件名称
+    interface_type: str = ""               # 界面类型（由 LLM 按工程本质确定，不限枚举）
+    description: str = ""                  # 界面关系描述（界面在哪里、连接/接触什么）
+    requirement: str = ""                  # 界面工程要求（量值来自知识库检索）
+    primary_owner: str = "self"            # 主要归属方："self"=挂载节点 / "counterpart"=对端
+    attribution_reason: str = ""           # 归属理由
+    regulation_binding: str = ""           # 法规/标准条款
+    responsible_agent: str = ""            # 产出该界面分析的专业 Agent
+
+    model_config = {"extra": "allow"}
+
+
 class FunctionAnalysisItem(BaseModel):
     """单个关注要素的功能分析 — 支持多功能
 
@@ -74,6 +100,9 @@ class FunctionAnalysisItem(BaseModel):
     # ── v7: 用于DB按工程师拆分 ──
     assignee_user_id: int = -1
     assignee_name: str = ""
+
+    # ── v26: 零部件间界面关系（本节点为主要归属方的界面）──
+    interfaces: List[InterfaceRelation] = Field(default_factory=list)
 
     # 前端兼容别名（v2 遗留字段，通过 computed_field 自动填充）
     component_name: str = ""

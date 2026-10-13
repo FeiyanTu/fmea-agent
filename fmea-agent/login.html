@@ -109,6 +109,31 @@ body {
   display: none;
 }
 .auth-error.show { display: block; }
+.auth-hint {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 12px;
+}
+.auth-hint code {
+  background: var(--primary-light);
+  color: var(--primary-hover);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.auth-note {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
 .auth-toggle {
   text-align: center;
   margin-top: 18px;
@@ -145,9 +170,10 @@ body {
 
   <!-- 登录表单 -->
   <div id="loginForm">
+    <!-- 后端按 "email = ? OR username = ?" 匹配，两种都支持，所以标签不能只写"邮箱" -->
     <div class="form-group">
-      <label>邮箱</label>
-      <input type="email" id="loginUsername" placeholder="请输入邮箱" autocomplete="email" />
+      <label>邮箱 / 用户名</label>
+      <input type="text" id="loginUsername" placeholder="请输入邮箱或用户名" autocomplete="username" />
     </div>
     <div class="form-group">
       <label>密码</label>
@@ -156,11 +182,19 @@ body {
     <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">登 录</button>
     <div class="auth-toggle">
       还没有账号？<a onclick="goExternalRegister()">立即注册</a>
+      <div style="margin-top:6px;font-size:12px">
+        注册在知识库系统完成，注册完成后回到本页登录
+      </div>
     </div>
   </div>
 
-  <!-- 注册表单 -->
+  <!-- 注册表单（注意：当前「立即注册」是跳转到知识库系统，本表单需要显式调 showRegister() 才会出现） -->
   <div id="registerForm" style="display:none">
+    <div class="auth-note">
+      这里是<b>自助注册</b>（密码由你自己设置）。<br />
+      如果你是<b>被管理员添加的团队成员</b>，不用注册 —— 直接返回登录页，
+      用<b>邮箱</b> + 管理员给你的初始密码登录即可。
+    </div>
     <div class="form-group">
       <label>用户名</label>
       <input type="text" id="regUsername" placeholder="2-50个字符" autocomplete="off" />

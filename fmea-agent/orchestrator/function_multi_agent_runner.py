@@ -34,7 +34,7 @@ from typing import Dict, List, Optional, Tuple
 from models.structure import StructureTree, StructureTreeNode
 from models.function import (
     FunctionAnalysis, FunctionAnalysisItem, FunctionDetail,
-    FunctionNetwork, FunctionRelation,
+    FunctionNetwork, FunctionRelation, InterfaceRelation,
 )
 
 logger = logging.getLogger("fmea.multi_agent.function")
@@ -877,6 +877,53 @@ class FunctionMultiAgentRunner:
                         is_regulation_mandated=bool(fn.get("is_regulation_mandated") or fclass == "法规合规功能"),
                     ))
 
+                # 解析 interfaces（v26: 零部件界面关系）
+                name_to_id = {n.name: n.id for n in tree.nodes}
+                parsed_itfs: List[InterfaceRelation] = []
+                raw_itfs = raw.get("interfaces") or []
+                if isinstance(raw_itfs, list):
+                    for itf in raw_itfs:
+                        if not isinstance(itf, dict):
+                            continue
+                        cp_id = (itf.get("counterpart_node_id")
+                                 or itf.get("counterpartNodeId") or "")
+                        cp_name = (itf.get("counterpart_node_name")
+                                   or itf.get("counterpartNodeName")
+                                   or itf.get("counterpart") or "")
+                        # 对端只给了名称 → 回查 ID；给了 ID 但不在树里 → 尝试按名匹配
+                        if cp_id and cp_id not in node_lookup:
+                            resolved = name_to_id.get(cp_id)
+                            if resolved:
+                                cp_name = cp_name or cp_id
+                                cp_id = resolved
+                        if (not cp_id or cp_id not in node_lookup) and cp_name:
+                            cp_id = name_to_id.get(cp_name, "")
+                        if not cp_id and not cp_name:
+                            continue
+                        owner = (itf.get("primaryOwner")
+                                 or itf.get("primary_owner") or "self")
+                        if owner not in ("self", "counterpart"):
+                            owner = "self"
+                        parsed_itfs.append(InterfaceRelation(
+                            node_id=node_id,
+                            node_name=(node_lookup.get(node_id).name
+                                       if node_id in node_lookup else ""),
+                            counterpart_node_id=cp_id,
+                            counterpart_node_name=(cp_name
+                                                   or (node_lookup.get(cp_id).name
+                                                       if cp_id in node_lookup else "")),
+                            interface_type=(itf.get("interface_type")
+                                            or itf.get("interfaceType") or ""),
+                            description=(itf.get("description") or itf.get("desc") or "")[:300],
+                            requirement=(itf.get("requirement") or "")[:200],
+                            primary_owner=owner,
+                            attribution_reason=(itf.get("attributionReason")
+                                                or itf.get("attribution_reason") or "")[:200],
+                            regulation_binding=(itf.get("regulation_binding")
+                                                or itf.get("regulationBinding") or ""),
+                            responsible_agent=agent_name,
+                        ))
+
                 # 合并到 by_node
                 if node_id not in by_node:
                     tn = node_lookup.get(node_id)
@@ -896,6 +943,7 @@ class FunctionMultiAgentRunner:
                         upper_level_function=raw.get("upper_level_function") or raw.get("upperLevelFunction") or "",
                         lower_level_function=raw.get("lower_level_function") or raw.get("lowerLevelFunction") or "",
                         functions=parsed_fns,
+                        interfaces=parsed_itfs,
                         llm_generated=True,
                         assignee_user_id=_uid,
                         assignee_name=_name,
@@ -910,6 +958,8 @@ class FunctionMultiAgentRunner:
                         if fn.description[:30] not in seen:
                             existing.functions.append(fn)
                             seen.add(fn.description[:30])
+                    if parsed_itfs:
+                        existing.interfaces.extend(parsed_itfs)
 
         # 按结构树顺序输出
         ordered = [by_node[n.id] for n in tree.nodes if n.id in by_node]
@@ -981,6 +1031,9 @@ class FunctionMultiAgentRunner:
                     if fn.description and fn.description[:40] not in keeper_fns:
                         items[keeper].functions.append(fn)
                         keeper_fns.add(fn.description[:40])
+                # 界面关系随节点合并一起迁移
+                items[keeper].interfaces.extend(items[dup].interfaces)
+                items[dup].interfaces = []
                 _console_log("PostProcess", f"去重: 「{dup_name}」→ 合并到「{keeper_name}」(+{len(items[dup].functions)}条)")
                 removed_ids.add(dup)
                 merged_count += 1
@@ -1038,6 +1091,11 @@ class FunctionMultiAgentRunner:
 
         if merged_count:
             _console_log("PostProcess", f"合并 {merged_count} 组重复节点，最终 {len(items)} 个节点")
+
+        # ── 3.5 界面关系后处理（v26）：界面作为一种功能，归属到主要零部件的 functions 里
+        #      必须在 domain_rows 构建之前完成，界面功能才能进既有功能表 ──
+        node_map = {n.id: n for n in tree.nodes} if tree else {}
+        items = self._post_process_interfaces(items, tree, node_map)
 
         # ── 4. 构建 domain_rows（参考Excel格式扁平行，每条功能一行，不合并） ──
         domain_rows = []
@@ -1108,6 +1166,106 @@ class FunctionMultiAgentRunner:
         self._domain_rows = domain_rows
         if domain_rows:
             _console_log("PostProcess", f"构建 {len(domain_rows)} 行 domain_rows（参考Excel格式）")
+
+        return items
+
+    def _post_process_interfaces(
+        self,
+        items: List[FunctionAnalysisItem],
+        tree: StructureTree,
+        node_map: dict,
+    ) -> List[FunctionAnalysisItem]:
+        """界面关系后处理（v26.1：界面作为一种功能，归属到主要零部件的功能表）
+
+        1. 补全节点名称（ID↔名称一致性）
+        2. 归属迁移：primaryOwner="counterpart" 且对端条目存在 → 界面迁移到对端条目上
+           （不变式：转换前每条界面都挂在它的主要归属方节点上）
+        3. 跨 Agent 去重：同一零部件对 + 同一界面类型只保留一条
+        4. 【关键】把每条界面转换为一条 FunctionDetail 追加到归属条目的 functions 列表
+           —— 界面就是一条功能，走既有的功能表/推送/失效分析链路，不引入新表结构
+        5. 转换后清空 item.interfaces，避免同一数据两处存储
+        """
+        item_by_id = {it.node_id: it for it in items}
+
+        # ── 名称补全 + 归属迁移 ──
+        for it in items:
+            kept = []
+            for itf in it.interfaces:
+                itf.node_name = (node_map.get(itf.node_id).name
+                                 if itf.node_id in node_map else (itf.node_name or it.node_name))
+                cp_tn = node_map.get(itf.counterpart_node_id)
+                if cp_tn:
+                    itf.counterpart_node_name = cp_tn.name
+                if itf.primary_owner == "counterpart" and itf.counterpart_node_id in item_by_id:
+                    # 迁移到对端条目并翻转方向
+                    cp_item = item_by_id[itf.counterpart_node_id]
+                    itf.node_id, itf.counterpart_node_id = itf.counterpart_node_id, itf.node_id
+                    itf.node_name, itf.counterpart_node_name = itf.counterpart_node_name, itf.node_name
+                    itf.primary_owner = "self"
+                    cp_item.interfaces.append(itf)
+                    _console_log("PostProcess",
+                                 f"界面归属迁移: {itf.interface_type}界面归 {itf.node_name}（{itf.attribution_reason[:30]}）")
+                    continue
+                kept.append(itf)
+            it.interfaces = kept
+
+        # ── 跨 Agent 去重：零部件对 + 界面类型 ──
+        pair_groups: Dict[tuple, List[tuple]] = {}  # (pair_key) -> [(owner_item, itf), ...]
+        for it in items:
+            for itf in it.interfaces:
+                if not itf.counterpart_node_id:
+                    continue
+                pair = tuple(sorted([it.node_id, itf.counterpart_node_id]))
+                key = (pair, (itf.interface_type or "").strip())
+                pair_groups.setdefault(key, []).append((it, itf))
+
+        drop_count = 0
+        for key, entries in pair_groups.items():
+            if len(entries) <= 1:
+                continue
+            # 优先保留"挂在主要归属方上"的条目（迁移后应都是 self）；并列时保留 requirement 更详细的
+            entries_sorted = sorted(
+                entries,
+                key=lambda e: (0 if e[1].primary_owner == "self" else 1,
+                               -len(e[1].requirement or "")),
+            )
+            keeper_item, keeper_itf = entries_sorted[0]
+            for other_item, other_itf in entries_sorted[1:]:
+                if other_itf is keeper_itf:
+                    continue
+                if other_itf in other_item.interfaces:
+                    other_item.interfaces.remove(other_itf)
+                    drop_count += 1
+        if drop_count:
+            _console_log("PostProcess", f"界面去重完成，共去除 {drop_count} 条重复")
+
+        # ── 转换为 FunctionDetail：界面 = 一条功能，挂到主要归属方的功能表 ──
+        converted = 0
+        for it in items:
+            for itf in it.interfaces:
+                cp = itf.counterpart_node_name or itf.counterpart_node_id or "对端"
+                itype = f"{itf.interface_type}·" if itf.interface_type else ""
+                desc = f"【界面{itype}】与「{cp}」：{itf.description}"
+                if itf.requirement:
+                    desc += f"（界面要求：{itf.requirement}）"
+                # 同描述去重（防重复转换）
+                if desc[:40] in {f.description[:40] for f in it.functions}:
+                    continue
+                seq = len(it.functions) + 1
+                it.functions.append(FunctionDetail(
+                    function_id=f"fn-{it.node_id}-{seq:02d}",
+                    description=desc,
+                    function_class="主功能",
+                    function_category="界面关系",
+                    flow_type=itf.interface_type or "无",
+                    regulation_binding=itf.regulation_binding or "",
+                    responsible_agent=itf.responsible_agent,
+                ))
+                converted += 1
+            it.interfaces = []  # 已转为功能，清空避免两处存储
+
+        if converted:
+            _console_log("PostProcess", f"{converted} 条界面关系已作为功能归属到主要零部件的功能表")
 
         return items
 
@@ -1472,6 +1630,16 @@ class FunctionStepAgent:
             "- 若相邻节点功能相似（如两组螺栓），从不同维度描述：强度/温度/密封/寿命/精度",
             "- 不允许两个相邻节点 description 前 30 字完全相同",
             "",
+            "### 5. 零部件界面关系分析（必做）",
+            "- 除功能外，必须分析本节点与结构树中其他零部件之间的**界面关系**（直接接触/连接/耦合的物理接口）",
+            "- 界面关系的具体内容（界面上有什么工程要求、要求量值是多少）**必须以 WeKnora 检索结果为依据**，由你从中提取、提炼；",
+            "  检索结果中没有的，不得编造数值，可标注\"需满足适用标准\"并写明你判断适用的标准方向",
+            "- interface_type 由你根据界面的工程本质确定（不限于常见分类）",
+            "- 每条界面关系必须判定**主要归属方**（primaryOwner）：界面关系中占主要部分的零部件归它。",
+            "  谁是\"主要部分\"由你基于工程语义和知识库依据综合判断，并在 attributionReason 中给出工程理由",
+            "- 用 primaryOwner 标注归属：\"self\"=当前分析节点 / \"counterpart\"=对端零部件",
+            "- 每个节点输出 0-5 条界面关系，只写与本节点**直接**相连/接触的零部件，禁止臆造不存在的连接",
+            "",
             "## 搜索数据使用说明",
             "- WeKnora 知识库检索结果在用户消息的\"## 本领域知识库检索结果\"段落中",
             "- 优先使用含 MPa/°C/mm 等单位的片段作为 description 的量化支撑",
@@ -1498,6 +1666,18 @@ class FunctionStepAgent:
             '          "safety_domain": "机械安全",',
             '          "sor_binding": "SOR-3.2",',
             '          "regulation_binding": "GB 38031-2020 §5.2"',
+            "        }",
+            "      ],",
+            '      "interfaces": [',
+            "        {",
+            '          "counterpart_node_id": "<对端零部件ID，必须是真实存在的节点ID>",',
+            '          "counterpart_node_name": "<对端零部件名称>",',
+            '          "interface_type": "<由你按界面工程本质确定>",',
+            '          "description": "<界面在哪里、两个零部件之间发生什么物理交互>",',
+            '          "requirement": "<该界面的工程要求，量值必须来自WeKnora检索结果；无检索依据则写适用的标准方向，禁止编造数值>",',
+            '          "primaryOwner": "self 或 counterpart",',
+            '          "attributionReason": "<谁是主要归属方、为什么，给出工程理由>",',
+            '          "regulation_binding": "<适用的标准/条款，来自检索结果；无则留空>"',
             "        }",
             "      ]",
             "    }",
@@ -1611,6 +1791,7 @@ class FunctionStepAgent:
             f"{domain} 功能 {node_names}",
             f"{domain} 设计要求 技术规范",
             f"{domain} 失效 风险 性能",
+            f"{node_names} 界面 接口 连接 配合 技术要求",
         ]
 
     async def _search_weknora(self, kb_id: str, queries: List[str]) -> Tuple[str, str]:
@@ -1675,7 +1856,7 @@ class FunctionStepAgent:
             "",
             "## 输出要求",
             "1. 严格按下文 JSON 格式输出（顶层含 functions 和 relations 数组）",
-            "2. 每个节点一个 entry，含 node_id / node_name / upper_level_function / lower_level_function / functions[]",
+            "2. 每个节点一个 entry，含 node_id / node_name / upper_level_function / lower_level_function / functions[] / interfaces[]",
             "3. 【关键】每条 function 必须包含 3 级功能链，逻辑一致：",
             '   - "upper_function": 上一较高级别功能及要求 — 本节点的父级或系统级有什么需求？结合 WeKnora 检索的法规/SOR 要求来写',
             '   - "description": 关键要素功能（本节点功能） — 本节点自身的功能描述，含量化参数',
@@ -1685,7 +1866,14 @@ class FunctionStepAgent:
             "6. safety_domain 从本零件相关的法规/SOR 知识中推断",
             "7. description 必须含至少一个量化参数（MPa/°C/mm/kPa/V/A/Ω/J/μm等）",
             "8. 每条 function 的 regulation_binding 必须填写具体标准编号",
-            "9. 只输出 JSON，不要解释文字",
+            "9. 【必做】每个节点输出 interfaces[]（零部件界面关系，0-5 条）：",
+            '   - counterpart_node_id / counterpart_node_name：对端零部件（必须从"分配给你的节点"及结构树上下文中真实存在的节点里选）',
+            '   - interface_type：由你按界面的工程本质确定',
+            '   - description：界面在哪里、两个零部件之间发生什么物理交互',
+            '   - requirement：该界面的工程要求 —— 具体是什么指标、量值多少，完全由界面性质和 WeKnora 检索结果决定，不得编造数值',
+            '   - primaryOwner："self"（当前节点为主要归属方）或 "counterpart"（对端为主要归属方）—— 界面关系中占主要部分的一方，由你判断',
+            '   - attributionReason：归属的工程理由',
+            "10. 只输出 JSON，不要解释文字",
         ])
         return "\n".join(lines)
 

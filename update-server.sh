@@ -41,9 +41,12 @@ tar -czf "$BACKUP_DIR/code.tar.gz" \
   --exclude='fmea-agent/logs' \
   --exclude='fmea-agent/tmp' \
   --exclude='fmea-agent/data' \
-  --exclude='fmea-agent/knowledge' \
+  --exclude='fmea-agent/knowledge/*/*' \
   --exclude='fmea-agent/.env' \
+  --exclude='fmea-agent/.envbat' \
   fmea-agent 2>/dev/null || true
+# 注：knowledge/*/* 只排除知识库数据子目录，保留 knowledge/*.py 包代码，
+#     这样备份里才有代码，回滚才真的能回滚。
 echo "    备份完成"
 
 # ── 3. 解压新代码到 APP_DIR（覆盖 fmea-agent/ 内代码，保留 data/knowledge/.env/.venv）──

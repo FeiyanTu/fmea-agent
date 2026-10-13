@@ -80,7 +80,7 @@ tar \
   --exclude='fmea-agent/logs' \
   --exclude='fmea-agent/tmp' \
   --exclude='fmea-agent/data' \
-  --exclude='fmea-agent/knowledge' \
+  --exclude='fmea-agent/knowledge/*/*' \
   --exclude='fmea-agent/.env' \
   -czf fmea-agent-code.tar.gz fmea-agent
 ```

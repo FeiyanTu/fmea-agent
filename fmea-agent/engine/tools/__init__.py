@@ -251,8 +251,8 @@ def get_agent_weknora_kb_id(agent_name: str) -> str:
 
     try:
         conn = psycopg2.connect(
-            host=os.getenv("URL_AGENT_DB_HOST", "10.180.17.11"),
-            port=int(os.getenv("URL_AGENT_DB_PORT", "5433")),
+            host=os.getenv("URL_AGENT_DB_HOST", "122.51.85.245"),
+            port=int(os.getenv("URL_AGENT_DB_PORT", "5432")),
             dbname=os.getenv("URL_AGENT_DB_NAME", "fmea"),
             user=os.getenv("URL_AGENT_DB_USER", "postgres"),
             password=os.getenv("URL_AGENT_DB_PASSWORD", "postgres123!@#"),

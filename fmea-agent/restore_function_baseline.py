@@ -10,8 +10,8 @@ import psycopg2
 BACKUP_SQL = r'C:\Users\wzjgha\Desktop\功能分析备份.sql'
 
 conn = psycopg2.connect(
-    host=os.getenv('URL_AGENT_DB_HOST', '10.180.17.11'),
-    port=int(os.getenv('URL_AGENT_DB_PORT', '5433')),
+    host=os.getenv('URL_AGENT_DB_HOST', '122.51.85.245'),
+    port=int(os.getenv('URL_AGENT_DB_PORT', '5432')),
     dbname=os.getenv('URL_AGENT_DB_NAME', 'fmea'),
     user=os.getenv('URL_AGENT_DB_USER', 'postgres'),
     password=os.getenv('URL_AGENT_DB_PASSWORD', 'postgres123!@#')

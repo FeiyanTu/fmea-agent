@@ -25,9 +25,14 @@ tar \
   --exclude='fmea-agent/logs' \
   --exclude='fmea-agent/tmp' \
   --exclude='fmea-agent/data' \
-  --exclude='fmea-agent/knowledge' \
+  --exclude='fmea-agent/knowledge/*/*' \
   --exclude='fmea-agent/.env' \
+  --exclude='fmea-agent/.envbat' \
   -czf fmea-agent-code.tar.gz fmea-agent
+# ⚠️ knowledge/ 里既有 Python 包（weknora_client.py / file_converter.py 等，必须上传），
+#    又有各项目的知识库数据（12V电池-weknora/ 等，必须排除）。
+#    所以只能排除 "knowledge/*/*"（子目录内容），不能写成 --exclude='fmea-agent/knowledge'
+#    ——那样会把 knowledge 包整个漏掉，服务器启动直接 ModuleNotFoundError。
 echo "    打包完成: $(du -h fmea-agent-code.tar.gz | cut -f1)"
 
 echo "==> [2/4] 上传到服务器 (${SERVER_USER}@${SERVER_HOST})"

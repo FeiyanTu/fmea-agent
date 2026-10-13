@@ -94,6 +94,16 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;   /* grid 1fr 行内不被内容撑高，保证侧栏永远不超过页面高度 */
+}
+/* 侧栏内容区（项目列表 / 分析步骤）：占满侧栏剩余高度，内部滚动。
+   flex:1 + min-height:0 让列表底部正好贴到页面底部，又不会把页面撑出滚动条。 */
+#projectListView,
+#stepsSection {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .sidebar-section {
   padding: 14px 16px 6px;
@@ -126,9 +136,12 @@ body {
 .project-action-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
 
 .project-list {
-  max-height: 200px; overflow-y: auto;
+  /* 原 max-height:200px 会把列表截断在侧栏上半部分；
+     改为 flex:1 撑满剩余高度，溢出时内部滚动（min-height:0 是 flex 内滚动的必要项） */
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
   padding: 0 12px 8px;
 }
+.project-list:empty { flex: 0 0 auto; }   /* 空列表时不占满高度，避免把空态文案推到最底部 */
 .project-list::-webkit-scrollbar { width: 4px; }
 .project-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
 .project-list-item {
@@ -2640,7 +2653,7 @@ body.fmea-readonly .tree-canvas-svg { opacity: 0.85; }
         <input type="text" class="project-search-input" id="projectSearchInput" placeholder="搜索项目..." oninput="filterProjectList()">
       </div>
       <div class="project-list" id="projectList"></div>
-      <div class="project-list-empty">暂无项目</div>
+      <div class="project-list-empty" id="projectListEmpty">暂无项目，点击 + 新建</div>
     </div>
     <!-- Current Project Info Card -->
     <div class="project-info-card" id="projectDetailView" style="display:none">
@@ -2985,9 +2998,14 @@ async function runStructureExtractDirectly() {
   const btn = document.getElementById('btnStepAction');
   const origText = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 提取中...'; }
+  // v24.2: 与「🎯 风险评估」按钮对齐 —— 先订阅工具进度 SSE。
+  //   结构树提取要跑知识库全文解析 + LLM 分批复核，耗时数分钟，
+  //   不订阅进度的话界面上毫无反馈，用户只能看到"卡住了"。
+  const projId = state.dirId;
+  subscribeToolProgress(projId, 'extract_structure_tree_tool', null, 'structure');
   // v23.8: 对话流——用户指令 → 机器人回应 → 进度卡 → 工具结果卡
   addChatMessage('user', '请根据知识库中的SOR文档，为当前项目构建产品结构树（系统→子系统→组件→零件），输出结构树JSON。');
-  addChatMessage('assistant', '🌳 **结构树提取启动**（智能调度后端构建流水线，预计 30-60 秒）...');
+  addChatMessage('assistant', '🌳 **结构树提取启动**（知识库全文解析 + LLM 分批复核，通常 2-8 分钟，请勿离开页面，进度见下方进度卡）...');
   try {
     const resp = await getAuthFetch(`${API_BASE}/projects/${state.dirId}/structure-tree/extract`, {
       method: 'POST', body: JSON.stringify({}),
@@ -2997,22 +3015,35 @@ async function runStructureExtractDirectly() {
       const errMsg = (data.error || data.result?.error) || resp.statusText;
       addChatMessage('assistant', `❌ **结构树提取失败**：${errMsg}`);
       showToast('提取失败: ' + errMsg, 'error');
+      removeToolProgress();
       return;
     }
     // 工具返回 JSON 字符串
     const result = data.result || {};
-    addChatMessage('assistant',
-      `✅ **结构树提取完成**\n\n` +
-      `• ${result.message || '已保存到结构分析 tab，请刷新查看。'}\n` +
-      `• 节点数: ${result.nodes_count ?? '-'}，总成数: ${result.assemblies ?? '-'}`);
+    // v23.3: 工具结果卡（与「🎯 风险评估」按钮保持一致）
+    if (typeof insertToolResultCard === 'function') {
+      insertToolResultCard('extract_structure_tree_tool', JSON.stringify(result));
+    } else {
+      addChatMessage('assistant',
+        `✅ **结构树提取完成**\n\n` +
+        `• ${result.message || '已保存到结构分析 tab。'}\n` +
+        `• 节点数: ${result.nodes_count ?? '-'}，总成数: ${result.assemblies ?? '-'}`);
+    }
     showToast('✅ 结构树已构建', 'success');
-    // 重新加载结构分析数据
+    // v24.2: 不再被 `state.currentTab === 'structure'` 挡住。
+    //   旧逻辑只在"当前正好在结构分析 tab"时才重载，用户在别的 tab 点按钮时数据不会刷新；
+    //   但也不能无脑 loadTabData（它写的是 contentBody，会覆盖当前 tab 的画面），
+    //   所以：在结构分析 tab 就直接重载，否则清掉结构缓存并提示切过去看。
     if (state.currentTab === 'structure') {
       await loadTabData('structure');
+    } else {
+      state.stepData['structure'] = null;
+      showToast('✅ 结构树已构建，切到「🌳 结构分析」查看', 'success', 4000);
     }
   } catch (e) {
     addChatMessage('assistant', `❌ <b>结构树提取异常</b>: ${e.message}`);
     showToast('提取异常: ' + e.message, 'error');
+    removeToolProgress();
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
@@ -3621,6 +3652,9 @@ setInterval(() => {
   }
 }, 30000);
 
+// v24.2: loadTabData 的请求序号（并发调用时只认最后一次，避免旧请求覆盖新结果）
+let _loadTabReqSeq = 0;
+
 async function loadTabData(tab) {
   const body = document.getElementById('contentBody');
   console.log('[loadTabData] called:', { tab, projectId: state.projectId, dirId: state.dirId, currentTab: state.currentTab });
@@ -3640,16 +3674,43 @@ async function loadTabData(tab) {
     return;
   }
 
+  // v24.2: 请求序号——并发调用时只有最后一次允许渲染，
+  //   否则先发起的那个会用旧数据/空状态覆盖后发起的渲染结果（表现为"卡在加载中"或"闪回旧数据"）
+  const _reqSeq = ++_loadTabReqSeq;
+  const isStale = () => _reqSeq !== _loadTabReqSeq;
+
   body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">⏳ 加载中...</div>';
 
   // v20.7/v20.8: 超时保护——timeoutPromise 在 fetch 处用 Promise.race 接入，避免悬空 reject
-  const LOAD_TIMEOUT_MS = 2000;
+  // v24.2: 2000ms 对结构树这种大 JSON（150+ 节点）太紧，放宽到 15s
+  const LOAD_TIMEOUT_MS = 15000;
   let didRender = false;
-  const safeSetBody = (html) => { body.innerHTML = html; didRender = true; };
+  const safeSetBody = (html) => { if (isStale()) return; body.innerHTML = html; didRender = true; };
+
+  // v24.2: 总看门狗——不管卡在哪一个 await（尤其是无超时的 fetchPushedStatus），
+  //   到点必须落地，绝不允许面板永久停在"⏳ 加载中..."
+  //   之前就是这个空档导致"结构树生成后页面一直加载中，得手动刷新"
+  const LOAD_WATCHDOG_MS = 30000;
+  const watchdog = setTimeout(() => {
+    if (didRender || isStale()) return;
+    didRender = true;
+    body.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">⏳</div>
+      <h2>加载超时</h2>
+      <p>数据请求超过 ${LOAD_WATCHDOG_MS / 1000} 秒未返回（后端可能仍在处理长任务）。</p>
+      <p style="font-size:12px;color:#94a3b8;margin-top:8px">稍等片刻后点右上角「刷新」，或切换步骤再切回来。</p>
+    </div>`;
+  }, LOAD_WATCHDOG_MS);
 
   // ★ 先拉取最新推送状态，确保 push 按钮显示正确的「已推送/未推送」状态
+  //   v24.2: 加 8s 超时，且失败/超时都不影响后续渲染
   clearPushedCache();
-  try { await fetchPushedStatus(state.dirId); } catch(e) { /* ignore */ }
+  try {
+    await Promise.race([
+      fetchPushedStatus(state.dirId),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('approvals-state 超时')), 8000)),
+    ]);
+  } catch (e) { /* ignore */ }
 
   try {
     // 交付物清单走专门 API
@@ -3720,6 +3781,11 @@ async function loadTabData(tab) {
       }
     }
 
+    // v24.2: 数据回来了但期间有更新的请求发出 → 让位，别用旧数据覆盖
+    if (isStale()) {
+      console.log('[loadTabData] 请求已过期，跳过渲染:', tab);
+      return;
+    }
     try {
       renderTabContent(tab, data);
       console.log('[loadTabData] renderTabContent completed for tab:', tab);
@@ -3736,14 +3802,18 @@ async function loadTabData(tab) {
   } catch (e) {
     console.error('[loadTabData] outer error:', e);
     // v20.7: 超时或异常时强制恢复 body（防止"加载中..."永远卡住）
+    // v24.2: 改走 safeSetBody，过期请求不再抢着渲染
     if (!didRender) {
-      body.innerHTML = `<div class="empty-state">
+      safeSetBody(`<div class="empty-state">
         <div class="empty-icon">⚠️</div>
         <h2>加载失败</h2>
         <p>${esc(String(e.message || e))}</p>
         <p style="font-size:12px;color:#94a3b8;margin-top:8px">请刷新页面或重新选择项目</p>
-      </div>`;
+      </div>`);
     }
+  } finally {
+    // v24.2: 无论成功、失败还是提前 return，都要撤掉看门狗
+    clearTimeout(watchdog);
   }
 }
 
@@ -4349,17 +4419,6 @@ function setLeader(name, email, userId) {
   if (userId) {
     document.getElementById('leaderIdHidden').textContent = String(userId);
   }
-  // 查找该成员的邮箱授权码
-  const authCodeHidden = document.getElementById('leaderAuthCodeHidden');
-  if (authCodeHidden) {
-    let members = [];
-    try {
-      const stored = localStorage.getItem('fmea_team_members');
-      if (stored) { const data = JSON.parse(stored); if (Array.isArray(data)) members = data; }
-    } catch (e) { /* ignore */ }
-    const member = members.find(m => m.email === email);
-    authCodeHidden.textContent = member && member.email_auth_code ? member.email_auth_code : '';
-  }
   renderLeaderTag();
 }
 
@@ -4369,8 +4428,6 @@ function clearLeader() {
   hidden.textContent = '';
   const idHidden = document.getElementById('leaderIdHidden');
   if (idHidden) idHidden.textContent = '';
-  const authCodeHidden = document.getElementById('leaderAuthCodeHidden');
-  if (authCodeHidden) authCodeHidden.textContent = '';
   renderLeaderTag();
 }
 
@@ -4500,14 +4557,19 @@ let _cachedPushedFetched = false;
 async function fetchPushedStatus(projectId) {
   if (_cachedPushedFetched) return _cachedPushed;
   if (!projectId) return {};
+  // v24.2: 加超时并**真正中止**请求。挂着的 fetch 会占满浏览器对同域的并发连接数（默认 6 个），
+  //   一旦堆积，后续所有请求（含 loadTabData 的取数）都会排队，整页表现成"一直加载中"。
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
   try {
-    const resp = await getAuthFetch(`${API_BASE}/projects/${projectId}/approvals-state`);
+    const resp = await getAuthFetch(`${API_BASE}/projects/${projectId}/approvals-state`,
+      { signal: ctl.signal });
     if (!resp.ok) return {};
     const d = await resp.json();
     _cachedPushed = { pushed: d.pushed === true, stage_pushes: d.stage_pushes || {} };
     _cachedPushedFetched = true;
     return _cachedPushed;
-  } catch { return {}; }
+  } catch { return {}; } finally { clearTimeout(timer); }
 }
 function clearPushedCache() { _cachedPushedFetched = false; _cachedPushed = null; }
 
@@ -6568,6 +6630,10 @@ function deleteTreeNode(nodeId) {
       stepData.nodes = stepData.nodes.filter(n => !toDelete.includes(n.id));
     }
     _treeNodes = (stepData && stepData.nodes) || _treeNodes.filter(n => !toDelete.includes(n.id));
+    // v25: 记录被删 node id 到删除集合（后端 merge 靠 _deleted_node_ids 真正丢弃 baseline 节点，
+    //      否则删除的节点会在保存 merge 时从 DB 基线复活）
+    const _delSet = (window['_deletedNodeIds_structure-tree'] = window['_deletedNodeIds_structure-tree'] || new Set());
+    toDelete.forEach(id => _delSet.add(id));
     closeTreeEditModal();
     closeDetailPanel();
     renderStructurePreserveFullscreen(document.getElementById('contentBody'), state.stepData.structure);
@@ -10047,12 +10113,23 @@ async function saveCurrentTab() {
   }
 
   try {
+    // v25: 结构树保存时附加显式删除的 node_id（后端 merge 靠它丢弃 baseline 中已删节点）
+    if (tab === 'structure') {
+      const _delSet = window['_deletedNodeIds_structure-tree'];
+      if (_delSet && _delSet.size) {
+        updatedData._deleted_node_ids = Array.from(_delSet);
+      }
+    }
     const resp = await getAuthFetch(`${API_BASE}/projects/${state.dirId}/step-data/${stepName}`, {
       method: 'POST',
       body: JSON.stringify(updatedData),
     });
     if (resp.ok) {
       state.stepData[tab] = updatedData;
+      // v25: 保存成功后清空结构树删除集合（避免累加已删除成功的 id）
+      if (tab === 'structure') {
+        window['_deletedNodeIds_structure-tree'] = new Set();
+      }
       // 收集本次修改了哪些字段, 展示在弹窗中
       const changedSummary = collectChangedFields(data, updatedData, edits, tab);
       showSaveResultModal({
@@ -10180,20 +10257,10 @@ function showSaveResultModal(d) {
 let _notifiedOptimizations = new Set();
 
 async function notifyOptimizationAssignees(data) {
-  // v17.13: 优化措施变更通知——按责任人邮箱聚合，一个工程师只收一封邮件
-  // 邮件内容只告知「项目名 + 待处理条数」，不列措施明细
+  // v21.0: 优化措施变更通知——按责任人邮箱聚合，一个工程师只收一条飞书通知
+  // 通知内容只告知「项目名 + 待处理条数」，不列措施明细
   // 触发：保存时责任人发生变更的条目（data.items = changedItems）
-  const planningData = state.stepData && state.stepData['planning'];
-  const leaderRaw = planningData ? (planningData.leader || '') : '';
-  const authCodeRaw = planningData ? (planningData.leader_auth_code || '') : '';
-  const senderEmail = (leaderRaw.match(/<(.+)>/) || [])[1] || '';
-  const senderAuthCode = authCodeRaw.trim();
-
-  if (!senderEmail || !senderAuthCode) {
-    console.warn('[EmailNotify] 跳过：缺少发件人信息（请先在规划阶段配置负责人邮箱和授权码）');
-    return;
-  }
-
+  // 注：飞书以应用身份发送，不再需要负责人邮箱授权码
   // 1) 按收件人邮箱聚合（responsible_person 为 "姓名<邮箱>" 格式）
   const byEmail = {};
   const items = data.items || [];
@@ -10224,18 +10291,16 @@ async function notifyOptimizationAssignees(data) {
       '',
       `项目「${projectName}」中有 ${info.count} 条优化措施已指派给您，请登录 FMEA 工作台查看并处理。`,
       '',
-      `此邮件由 FMEA Agent 系统自动发送。`,
+      `此通知由 FMEA Agent 系统自动发送。`,
     ].join('\n');
     try {
       const resp = await getAuthFetch(`${API_BASE}/email/send`, {
         method: 'POST',
         body: JSON.stringify({
-          sender_email: senderEmail,
-          sender_auth_code: senderAuthCode,
           recipient_email: recipientEmail,
           subject: `【FMEA 通知】${projectName} — 您有 ${info.count} 条优化措施待处理`,
           body: body,
-          // v17.12: 邮件开关（optimize_assignee @ stage 5）——后端查 DB 开关，关闭则跳过
+          // 通知开关（optimize_assignee @ stage 5）——后端查 DB 开关，关闭则跳过
           notification_type: 'optimize_assignee',
           project_id: state.dirId,
           stage_id: 5,
@@ -10243,12 +10308,12 @@ async function notifyOptimizationAssignees(data) {
       });
       const result = await resp.json();
       if (result.success) {
-        console.log(`📧 已通知 ${info.name}（${recipientEmail}）：${info.count} 条`);
+        console.log(`📨 已通知 ${info.name}（${recipientEmail}）：${info.count} 条`);
       } else {
-        console.warn(`⚠️ 邮件发送失败（${info.name}）: ${result.error || result.message || '未知错误'}`);
+        console.warn(`⚠️ 飞书通知发送失败（${info.name}）: ${result.error || result.message || '未知错误'}`);
       }
     } catch (e) {
-      console.warn(`⚠️ 邮件发送异常（${info.name}）: ${e.message}`);
+      console.warn(`⚠️ 飞书通知发送异常（${info.name}）: ${e.message}`);
     }
   }
 }
@@ -11277,10 +11342,14 @@ async function refreshProjectList() {
 
 function renderProjectList(projects) {
   const listEl = document.getElementById('projectList');
+  const emptyEl = document.getElementById('projectListEmpty');
   if (!projects || projects.length === 0) {
-    listEl.innerHTML = '<div class="project-list-empty">暂无项目，点击 + 新建</div>';
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = '';
     return;
   }
+  // 有项目时隐藏静态空态（否则会跟着卡片一起显示，且被 flex 布局推到页面最底部）
+  if (emptyEl) emptyEl.style.display = 'none';
   // 用卡片样式渲染（按用户截图）
   listEl.innerHTML = projects.map(p => {
     const stepCount = p.stepCount || Object.keys(p.steps || {}).length;

@@ -1,28 +1,31 @@
 """
-工程师邮件推送工具 — 把指派给工程师的结构节点通过邮件通知。
+工程师通知推送工具 — 把指派给工程师的结构节点通过飞书通知。
+
+v21.0: 推送通道由 SMTP 邮件改为飞书机器人卡片消息（邮箱直发，receive_id_type=email）。
 
 策略:
   1. 读取项目结构树 (01-structure-tree.json)
   2. 按 assignee_user_id 聚合
   3. 为每个被指派人从 users 表查 email
-  4. 复用现有 SMTP 发送通道
+  4. 通过飞书应用（feishu_push）发送卡片消息（无需发件人授权码）
   5. 返回汇总 (谁/多少节点/状态)
 
 注册为 Agent 工具, 允许管理员通过对话触发.
+
+注意: send_stage_complete_email / send_stage_review_request_email 等函数名保留
+"email" 字样是为了兼容既有调用点（main.py / *_tools.py 共 7 处），实际走飞书。
 """
 import os
 import json
-import smtplib
-import ssl
 import logging
 import psycopg2
 import psycopg2.extras
-from email.mime.text import MIMEText
-from email.header import Header
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
 from datetime import datetime
+
+from engine.tools.feishu_push import send_card_to_contact as _feishu_send, is_configured as _feishu_configured
 
 logger = logging.getLogger(__name__)
 
@@ -41,43 +44,20 @@ def _get_db_conn():
         cursor_factory=psycopg2.extras.RealDictCursor,
     )
 
-# ── SMTP 智能路由 (复用 main.py 逻辑) ──
-SMTP_HOST_MAP = {
-    "qq.com": ("smtp.qq.com", 465, "ssl"),
-    "163.com": ("smtp.163.com", 465, "ssl"),
-    "126.com": ("smtp.126.com", 465, "ssl"),
-    "gmail.com": ("smtp.gmail.com", 465, "ssl"),
-    "outlook.com": ("smtp-mail.outlook.com", 587, "starttls"),
-    "hotmail.com": ("smtp-mail.outlook.com", 587, "starttls"),
-}
+# ── 飞书发送通道（v21.0 替代 SMTP）──
+def _send_feishu(to_email: str, subject: str, body: str) -> tuple:
+    """通过飞书应用给指定邮箱对应的用户发卡片消息. 返回 (ok, error_msg)
 
-def _send_smtp(sender_email: str, sender_auth: str, to_email: str,
-               subject: str, body: str) -> tuple:
-    """发送一封邮件. 返回 (ok, error_msg)"""
+    - 收件标识仍用 users 表里的 email（飞书邮箱直发，无需发件人授权码）
+    - 发送失败静默降级：返回 (False, err)，不影响主流程
+    """
+    if not to_email or not to_email.strip():
+        return False, "收件邮箱为空"
+    if not _feishu_configured():
+        return False, "飞书未配置（FEISHU_APP_ID / FEISHU_APP_SECRET）"
     try:
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["From"] = sender_email
-        msg["To"] = to_email
-        msg["Subject"] = Header(subject, "utf-8")
-
-        domain = sender_email.lower().split("@")[-1]
-        host, port, mode = SMTP_HOST_MAP.get(domain, ("smtp.qq.com", 465, "ssl"))
-
-        if mode == "ssl":
-            ctx = ssl.create_default_context()
-            server = smtplib.SMTP_SSL(host, port, timeout=15, context=ctx)
-        else:
-            server = smtplib.SMTP(host, port, timeout=15)
-            server.starttls()
-        try:
-            server.login(sender_email, sender_auth)
-            server.sendmail(sender_email, [to_email], msg.as_string())
-        finally:
-            try:
-                server.quit()
-            except Exception:
-                pass
-        return True, None
+        ok = _feishu_send(email=to_email.strip(), title=subject, content=body)
+        return (True, None) if ok else (False, "飞书发送失败（详见服务日志）")
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
 
@@ -131,30 +111,6 @@ def is_email_enabled(project_id, stage_id, notification_type: str) -> bool:
         return True
 
 
-def _get_admin_sender() -> Optional[dict]:
-    """取管理员邮箱 + auth_code（全局统一发件人；管理员不作为任何项目负责人）"""
-    try:
-        conn = _get_user_db()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT u.email, u.email_auth_code, u.display_name FROM users u "
-                    "WHERE u.role_code = 'admin' AND u.email IS NOT NULL AND u.email_auth_code IS NOT NULL "
-                    "ORDER BY u.id LIMIT 1"
-                )
-                row = cur.fetchone()
-                if not row:
-                    return None
-                if isinstance(row, dict):
-                    return {"email": row.get("email"), "auth_code": row.get("email_auth_code"), "name": row.get("display_name")}
-                return {"email": row[0], "auth_code": row[1], "name": row[2]}
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.warning(f"[EmailSwitch] 查管理员发件人失败: {e}")
-        return None
-
-
 def _get_leader_email(db_pid: int) -> Optional[str]:
     """取项目负责人邮箱（projects.leader_user_id → users.email）"""
     try:
@@ -194,25 +150,20 @@ def _get_project_name(db_pid: int) -> str:
 
 
 def send_stage_complete_email(stage_id: int, project_id) -> bool:
-    """每步脚本跑完后调：查开关 → 管理员发件 → 负责人收件 → 发邮件"""
+    """每步脚本跑完后调：查开关 → 项目负责人收件 → 发飞书通知"""
     try:
         db_pid = _resolve_db_project_id(str(project_id))
         if not db_pid:
-            logger.warning(f"[EmailSwitch] 项目 {project_id} 无法解析 DB ID，跳过邮件")
+            logger.warning(f"[FeishuNotify] 项目 {project_id} 无法解析 DB ID，跳过通知")
             return False
         # 开关判断
         if not is_email_enabled(db_pid, stage_id, "stage_complete"):
-            logger.info(f"[EmailSwitch] 阶段 {stage_id} 完成通知已关闭（project={db_pid}），跳过")
-            return False
-        # 发件人 = 管理员
-        sender = _get_admin_sender()
-        if not sender:
-            logger.warning("[EmailSwitch] 未配置管理员邮箱/授权码，跳过邮件")
+            logger.info(f"[FeishuNotify] 阶段 {stage_id} 完成通知已关闭（project={db_pid}），跳过")
             return False
         # 收件人 = 项目负责人
         to_email = _get_leader_email(db_pid)
         if not to_email:
-            logger.warning(f"[EmailSwitch] 项目 {db_pid} 负责人未配置邮箱，跳过邮件")
+            logger.warning(f"[FeishuNotify] 项目 {db_pid} 负责人未配置邮箱，跳过通知")
             return False
 
         project_name = _get_project_name(db_pid)
@@ -224,23 +175,22 @@ def send_stage_complete_email(stage_id: int, project_id) -> bool:
             f"—— FMEA Agent 自动通知\n"
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        ok, err = _send_smtp(sender["email"], sender["auth_code"], to_email, subject, body)
+        ok, err = _send_feishu(to_email, subject, body)
         if ok:
-            logger.info(f"[EmailSwitch] 阶段完成邮件已发送: {sender['email']} → {to_email} 「{subject}」")
+            logger.info(f"[FeishuNotify] 阶段完成通知已发送: → {to_email} 「{subject}」")
         else:
-            logger.warning(f"[EmailSwitch] 阶段完成邮件发送失败: {err}")
+            logger.warning(f"[FeishuNotify] 阶段完成通知发送失败: {err}")
         return ok
     except Exception as e:
-        logger.warning(f"[EmailSwitch] send_stage_complete_email 异常: {e}")
+        logger.warning(f"[FeishuNotify] send_stage_complete_email 异常: {e}")
         return False
 
 
 def send_stage_review_request_email(stage_id: int, project_id) -> bool:
-    """v20.0: 所有工程师都已提交某阶段后, 给项目负责人发审核提醒邮件.
+    """v20.0: 所有工程师都已提交某阶段后, 给项目负责人发审核提醒（v21.0 起走飞书）.
 
     触发点: 工程师调用 /api/approval/approve 提交后, 当 is_all_approved=True 时
     收件人: 项目负责人（leader）
-    发件人: 管理员（admin）
     开关: email_notification_switch.notification_type='stage_review_request', stage_id=1-5
     """
     # 只在 1-5 阶段生效（结构/功能/失效/风险/优化；规划和报告不走此流程）
@@ -249,21 +199,16 @@ def send_stage_review_request_email(stage_id: int, project_id) -> bool:
     try:
         db_pid = _resolve_db_project_id(str(project_id))
         if not db_pid:
-            logger.warning(f"[EmailSwitch] 项目 {project_id} 无法解析 DB ID, 跳过审核提醒")
+            logger.warning(f"[FeishuNotify] 项目 {project_id} 无法解析 DB ID, 跳过审核提醒")
             return False
         # 开关判断
         if not is_email_enabled(db_pid, stage_id, "stage_review_request"):
-            logger.info(f"[EmailSwitch] 阶段 {stage_id} 审核提醒已关闭 (project={db_pid}), 跳过")
-            return False
-        # 发件人 = 管理员
-        sender = _get_admin_sender()
-        if not sender:
-            logger.warning("[EmailSwitch] 未配置管理员邮箱/授权码, 跳过审核提醒")
+            logger.info(f"[FeishuNotify] 阶段 {stage_id} 审核提醒已关闭 (project={db_pid}), 跳过")
             return False
         # 收件人 = 项目负责人
         to_email = _get_leader_email(db_pid)
         if not to_email:
-            logger.warning(f"[EmailSwitch] 项目 {db_pid} 负责人未配置邮箱, 跳过审核提醒")
+            logger.warning(f"[FeishuNotify] 项目 {db_pid} 负责人未配置邮箱, 跳过审核提醒")
             return False
 
         project_name = _get_project_name(db_pid)
@@ -276,18 +221,18 @@ def send_stage_review_request_email(stage_id: int, project_id) -> bool:
             f"—— FMEA Agent 自动通知\n"
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        ok, err = _send_smtp(sender["email"], sender["auth_code"], to_email, subject, body)
+        ok, err = _send_feishu(to_email, subject, body)
         if ok:
-            logger.info(f"[EmailSwitch] 阶段审核提醒已发送: {sender['email']} → {to_email} 「{subject}」")
+            logger.info(f"[FeishuNotify] 阶段审核提醒已发送: → {to_email} 「{subject}」")
         else:
-            logger.warning(f"[EmailSwitch] 阶段审核提醒发送失败: {err}")
+            logger.warning(f"[FeishuNotify] 阶段审核提醒发送失败: {err}")
         return ok
     except Exception as e:
-        logger.warning(f"[EmailSwitch] send_stage_review_request_email 异常: {e}")
+        logger.warning(f"[FeishuNotify] send_stage_review_request_email 异常: {e}")
         return False
 
 # ═══════════════════════════════════════════════════════════
-# 发件人凭据 — 从项目负责人的 email_auth_code 取
+# v21.0: 发送通道已切换为飞书应用，不再需要发件人邮箱授权码
 # ═══════════════════════════════════════════════════════════
 
 def _resolve_db_project_id(project_id: str) -> Optional[int]:
@@ -315,59 +260,6 @@ def _resolve_db_project_id(project_id: str) -> Optional[int]:
             conn.close()
     except Exception as e:
         logger.warning(f"[Push] 解析 DB 项目 ID 失败 (project_id={project_id}): {e}")
-    return None
-
-
-def _get_owner_credentials(project_id: str) -> Optional[dict]:
-    """从 DB 查出项目负责人的邮箱+授权码.
-
-    优先级: role_code='owner' → 'leader' → 'admin' 的项目成员.
-    返回 {email, auth_code, display_name, role} 或 None.
-    """
-    db_pid = _resolve_db_project_id(project_id)
-    if db_pid is None:
-        logger.warning(f"[Push] 无法解析项目 {project_id} 的整数 DB ID")
-        return None
-    try:
-        conn = _get_db_conn()
-        try:
-            with conn.cursor() as cur:
-                # 按优先级匹配项目负责人: owner > leader > admin
-                cur.execute("""
-                    SELECT u.email, u.email_auth_code, u.display_name, u.username, pm.role_code
-                    FROM project_members pm
-                    JOIN users u ON u.id = pm.user_id
-                    WHERE pm.project_id = %s
-                      AND pm.role_code IN ('owner', 'leader', 'admin')
-                      AND u.email <> '' AND u.email_auth_code <> ''
-                    ORDER BY CASE pm.role_code
-                        WHEN 'owner' THEN 1
-                        WHEN 'leader' THEN 2
-                        WHEN 'admin' THEN 3
-                    END
-                    LIMIT 1
-                """, (db_pid,))
-                row = cur.fetchone()
-        finally:
-            conn.close()
-        if row and row.get("email") and row.get("email_auth_code"):
-            return {
-                "email": row["email"].strip(),
-                "auth_code": row["email_auth_code"].strip(),
-                "display_name": (row.get("display_name") or row.get("username") or "").strip(),
-                "role": row.get("role_code", ""),
-            }
-    except Exception as e:
-        logger.error(f"[Push] 查询项目负责人失败: {e}")
-    return None
-
-
-def _get_fallback_credentials() -> Optional[dict]:
-    """从环境变量取系统级发件人作为兜底. 返回 {email, auth_code} 或 None."""
-    email = os.getenv("FMEA_NOTIFY_SENDER_EMAIL")
-    auth = os.getenv("FMEA_NOTIFY_SENDER_AUTH")
-    if email and auth:
-        return {"email": email.strip(), "auth_code": auth.strip(), "display_name": ""}
     return None
 
 
@@ -618,35 +510,20 @@ async def _push_to_engineers_internal(
     user_ids = list(groups.keys())
     users = _lookup_user_emails(user_ids)
 
-    # 4. 获取发件人 — 优先用项目负责人的邮箱授权码，兜底用 .env 全局配置
-    owner = _get_owner_credentials(project_id)
-    if owner:
-        sender_email = owner["email"]
-        sender_auth = owner["auth_code"]
-        result["sender"] = {
-            "email": sender_email, "name": owner["display_name"], "source": "project_owner",
-            "role": owner.get("role", ""),
-        }
-    else:
-        fallback = _get_fallback_credentials()
-        if fallback:
-            sender_email = fallback["email"]
-            sender_auth = fallback["auth_code"]
-            result["sender"] = {
-                "email": sender_email, "name": fallback.get("display_name", ""),
-                "source": "env_fallback",
-            }
-        else:
-            result["status"] = "error"
-            result["error"] = (
-                "无法获取发件人凭据:\n"
-                "  1. 项目负责人在 users 表中未配置 email_auth_code\n"
-                "  2. .env 未配置 FMEA_NOTIFY_SENDER_EMAIL / FMEA_NOTIFY_SENDER_AUTH\n\n"
-                "请按以下任一种方式配置:\n"
-                "  A) 在「团队管理」页面编辑负责人信息，填写邮箱和邮箱授权码\n"
-                "  B) 修改 .env 文件添加 FMEA_NOTIFY_SENDER_EMAIL 和 FMEA_NOTIFY_SENDER_AUTH"
-            )
-            return result
+    # 4. 检查飞书发送通道（v21.0: 应用身份发送，不再需要负责人授权码）
+    if not _feishu_configured():
+        result["status"] = "error"
+        result["error"] = (
+            "飞书发送通道未配置:\n"
+            "  请在 .env 中配置 FEISHU_APP_ID / FEISHU_APP_SECRET\n"
+            "  （并确认飞书应用已开通 im:message 权限、应用可用范围包含收件用户）"
+        )
+        return result
+    result["sender"] = {
+        "email": os.getenv("FEISHU_APP_ID", "feishu_app"),
+        "name": "FMEA 飞书机器人",
+        "source": "feishu_app",
+    }
 
     # 5. 逐个发送
     proj_name = project_name or project_id
@@ -661,7 +538,7 @@ async def _push_to_engineers_internal(
             })
             continue
         subject, body = _build_email_content_step(assignee, items, project_id, proj_name, base_url, step_name, step_display)
-        ok, err = _send_smtp(sender_email, sender_auth, email, subject, body)
+        ok, err = _send_feishu(email, subject, body)
         if ok:
             result["success_count"] += 1
             result["details"].append({
@@ -713,7 +590,7 @@ def _build_email_content_step(
 async def push_structure_to_engineers(
     project_id: str, project_name: str = "", base_url: Optional[str] = None,
 ) -> str:
-    """Agent 工具: 推送结构树指派给工程师 (发邮件), 返回纯文本摘要."""
+    """Agent 工具: 推送结构树指派给工程师 (飞书通知), 返回纯文本摘要."""
     data = await _push_to_engineers_internal(project_id, project_name, base_url)
 
     if data["status"] == "error":

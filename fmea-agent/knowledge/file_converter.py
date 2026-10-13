@@ -82,10 +82,20 @@ def load_document(filepath: str) -> Tuple[Dict, str]:
             result = _load_pdf(path, original_name, size_kb)
         elif ext in (".xlsx", ".xls"):
             result = _load_xlsx(path, original_name, size_kb)
-        elif ext == ".docx":
-            result = _load_docx(path, original_name, size_kb)
+        elif ext in (".docx", ".doc"):
+            # .doc 里绝大多数其实是改名后的 OOXML，先按 docx 解析；
+            # 真正的老版二进制 .doc（OLE 复合文档）解析失败时退回文本读取。
+            try:
+                result = _load_docx(path, original_name, size_kb)
+            except Exception as e:
+                logger.warning(f"[Loader] {ext} 按 docx 解析失败，转文本回退: {e}")
+                result = _load_text(path, original_name, size_kb)
         elif ext in (".pptx", ".ppt"):
-            result = _load_pptx(path, original_name, size_kb)
+            try:
+                result = _load_pptx(path, original_name, size_kb)
+            except Exception as e:
+                logger.warning(f"[Loader] {ext} 按 pptx 解析失败，转文本回退: {e}")
+                result = _load_text(path, original_name, size_kb)
         else:
             result = _load_text(path, original_name, size_kb)
 
@@ -612,7 +622,10 @@ def convert_file_to_markdown(filepath: str) -> Tuple[str, str]:
 
     parts = [doc["text"]]
 
-    # 表格转 Markdown
+    def _esc(v) -> str:
+        # 单元格内的换行与竖线会切碎 Markdown 表格，必须转义
+        return str(v).replace("\n", " ").replace("|", "\\|").strip()
+
     for t in doc.get("tables", []):
         caption = t.get("caption", "")
         headers = t.get("headers", [])
@@ -622,13 +635,11 @@ def convert_file_to_markdown(filepath: str) -> Tuple[str, str]:
             continue
 
         md_lines = [f"\n### {caption}\n"]
-        md_lines.append("| " + " | ".join(h) for h in [headers])  # 这种写法不对
-
-    # 简化：只用 text + 表格摘要
-    if doc["tables"]:
-        parts.append(f"\n\n---\n### 结构化表格 ({len(doc['tables'])} 个)")
-        for t in doc["tables"]:
-            parts.append(f"\n**{t.get('caption', '')}** ({len(t.get('rows', []))} 行)")
+        md_lines.append("| " + " | ".join(_esc(h) for h in headers) + " |")
+        md_lines.append("| " + " | ".join("---" for _ in headers) + " |")
+        for row in rows:
+            md_lines.append("| " + " | ".join(_esc(c) for c in row) + " |")
+        parts.append("\n".join(md_lines))
 
     return "\n\n".join(parts), original_name
 

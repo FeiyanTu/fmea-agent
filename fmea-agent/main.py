@@ -11,13 +11,8 @@ import shutil
 import asyncio
 import datetime
 import logging
-import smtplib
-import ssl
-import socket
 import bcrypt
 import contextlib
-from email.mime.text import MIMEText
-from email.header import Header
 from pathlib import Path
 from typing import Optional, Union
 
@@ -165,6 +160,9 @@ validate_config()
 
 # ── 校验通过后才导入 Agno 框架 ──
 sys.path.insert(0, str(AGNO_PATH))
+
+# 关闭 agno telemetry：内网服务器访问不了 os-api.agno.com，启动会卡在外网 POST 请求
+os.environ.setdefault("AGNO_TELEMETRY", "false")
 
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
@@ -928,10 +926,24 @@ def run_failure_analysis_tool(project_id: str = "") -> str:
 # FMEA Agent（基础能力 = agno/server.py + FMEA 特化扩展）
 # ════════════════════════════════════════════════════════════════
 
+# ── One API 网关连接复用 bug 规避 ──
+# 实测：对 One API 网关复用 keep-alive 连接时，多轮工具调用（第一轮 200 →
+# 第二轮回传 tool 结果）会稳定返回 404。禁用 keep-alive（每请求新建连接）后
+# 100% 成功。qwen3.8-flash-next / DeepSeek-V4-Flash 均受影响。
+_llm_http_client = httpx.AsyncClient(
+    limits=httpx.Limits(max_keepalive_connections=0),
+    timeout=httpx.Timeout(600.0, connect=20.0),
+)
+
 fmea_agent = Agent(
     name="FMEA 专家",
     description="专业的 FMEA（失效模式与影响分析）智能助手，引导完成7步DFMEA/PFMEA全流程",
-    model=OpenAIChat(id=MODEL_NAME, base_url=MODEL_BASE_URL, api_key=MODEL_API_KEY),
+    model=OpenAIChat(
+        id=MODEL_NAME,
+        base_url=MODEL_BASE_URL,
+        api_key=MODEL_API_KEY,
+        http_client=_llm_http_client,
+    ),
     # ⚠️ 仅使用自定义工具，不使用任何 agno 内置工具
     # 已禁用的: CalculatorTools / DuckDuckGoTools / PythonTools / FileTools
     tools=[
@@ -1142,6 +1154,7 @@ agent_os = AgentOS(
     agents=[fmea_agent],
     db=db,
     interfaces=[agui],
+    telemetry=False,
 )
 
 app = agent_os.get_app()
@@ -1171,8 +1184,8 @@ JWT_SECRET = os.getenv("FMEA_JWT_SECRET", "fmea-agent-jwt-secret-key-2026-must-b
 JWT_ALGORITHM = "HS256"
 
 # ── 用户数据库（仅 PostgreSQL）──
-DB_HOST = os.getenv("URL_AGENT_DB_HOST", "10.180.17.11")
-DB_PORT = int(os.getenv("URL_AGENT_DB_PORT", "5433"))
+DB_HOST = os.getenv("URL_AGENT_DB_HOST", "122.51.85.245")
+DB_PORT = int(os.getenv("URL_AGENT_DB_PORT", "5432"))
 DB_NAME = os.getenv("URL_AGENT_DB_NAME", "fmea")
 DB_USER = os.getenv("URL_AGENT_DB_USER", "postgres")
 DB_PASSWORD = os.getenv("URL_AGENT_DB_PASSWORD", "postgres123!@#")
@@ -1587,6 +1600,11 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hash_str: str) -> bool:
     return hash_password(password) == hash_str
+
+# 「团队管理 → 新增成员」创建成员时使用的初始密码（可用 .env 覆盖）
+# ⚠️ 必须经 hash_password() 入库：登录校验是 sha256(pw + JWT_SECRET)，
+#    曾经这里直接存 sha256(pw)（漏了 JWT_SECRET），导致新增成员用任何密码都登不进去。
+DEFAULT_MEMBER_PASSWORD = os.getenv("FMEA_DEFAULT_MEMBER_PASSWORD", "fmea123")
 
 def create_token(user_data: dict) -> str:
     payload = {
@@ -2356,7 +2374,6 @@ async def api_list_team_members(request: Request):
             SELECT u.id,
                    u.display_name AS name,
                    u.email,
-                   u.email_auth_code,
                    u.kb_auth_code,
                    u.role_code,
                    r.name AS role_name,
@@ -2372,7 +2389,6 @@ async def api_list_team_members(request: Request):
         for r in rows:
             result.append({
                 "id": r["id"], "name": r["name"], "email": r["email"],
-                "email_auth_code": r["email_auth_code"],
                 "kb_auth_code": r["kb_auth_code"] or "",
                 "role_code": r["role_code"],
                 "role_name": r["role_name"] or r["role_code"],
@@ -2397,7 +2413,6 @@ async def api_create_team_member(request: Request):
         return JSONResponse({"error": "请求体不是有效 JSON"}, status_code=400)
     name = str(body.get("name", "")).strip()
     email = str(body.get("email", "")).strip()
-    email_auth_code = str(body.get("email_auth_code", "")).strip()
     kb_auth_code = str(body.get("kb_auth_code", "")).strip()
     role_code = str(body.get("role_code", "engineer")).strip()
     dept = str(body.get("dept", "")).strip()
@@ -2406,8 +2421,7 @@ async def api_create_team_member(request: Request):
         return JSONResponse({"error": "姓名不能为空"}, status_code=400)
     if not email:
         return JSONResponse({"error": "邮箱不能为空"}, status_code=400)
-    if role_code == "leader" and not email_auth_code:
-        return JSONResponse({"error": "项目负责人必须填写邮箱授权码"}, status_code=400)
+    # v25.0: 邮箱授权码已废弃（通知改走飞书），不再采集/校验
     if role_code == "leader" and not kb_auth_code:
         return JSONResponse({"error": "项目负责人必须填写知识库授权码"}, status_code=400)
     conn = get_user_db_conn()
@@ -2423,18 +2437,28 @@ async def api_create_team_member(request: Request):
         if cur.fetchone():
             import random
             username = f"{username}_{random.randint(1000,9999)}"
-        import hashlib
-        default_pw = hashlib.sha256("fmea123".encode()).hexdigest()
+        # 初始密码必须用 hash_password()（= sha256(pw + JWT_SECRET)）与登录校验保持一致
+        default_pw = hash_password(DEFAULT_MEMBER_PASSWORD)
         cur.execute(
-            """INSERT INTO users (username, password_hash, display_name, email, email_auth_code,
+            """INSERT INTO users (username, password_hash, display_name, email,
                                  kb_auth_code, role_code, dept, active, role)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'user') RETURNING id""",
-            (username, default_pw, name, email, email_auth_code, kb_auth_code, role_code, dept, active)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'user') RETURNING id""",
+            (username, default_pw, name, email, kb_auth_code, role_code, dept, active)
         )
         new_id = cur.fetchone()["id"]
         conn.commit()
-        logger.info(f"创建团队成员: {name} (role={role_code})")
-        return JSONResponse({"id": new_id, "name": name, "email": email, "role_code": role_code, "dept": dept, "active": active})
+        logger.info(
+            f"创建团队成员: {name} (role={role_code}, 登录名={username}, "
+            f"初始密码={DEFAULT_MEMBER_PASSWORD})"
+        )
+        # 把登录名与初始密码回给前端：管理员需要把它们告知成员，
+        # 否则只知道"已添加"，成员根本不知道该怎么登录（原实现没返回这两个值）
+        return JSONResponse({
+            "id": new_id, "name": name, "email": email, "role_code": role_code,
+            "dept": dept, "active": active,
+            "username": username,
+            "default_password": DEFAULT_MEMBER_PASSWORD,
+        })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     finally:
@@ -2466,10 +2490,8 @@ async def api_update_team_member(member_id: int, request: Request):
             if not email_val:
                 return JSONResponse({"error": "邮箱不能为空"}, status_code=400)
         target_role = body.get("role_code", current["role_code"])
-        target_auth = body.get("email_auth_code", current["email_auth_code"] or "")
         target_kb_auth = body.get("kb_auth_code", current["kb_auth_code"] or "")
-        if target_role == "leader" and not target_auth:
-            return JSONResponse({"error": "项目负责人必须填写邮箱授权码"}, status_code=400)
+        # v25.0: 邮箱授权码已废弃（通知改走飞书），不再校验/更新
         if target_role == "leader" and not target_kb_auth:
             return JSONResponse({"error": "项目负责人必须填写知识库授权码"}, status_code=400)
 
@@ -2478,7 +2500,7 @@ async def api_update_team_member(member_id: int, request: Request):
         if "name" in body:
             updates.append("display_name = %s")
             params.append(str(body["name"]).strip())
-        for fld in ("email", "email_auth_code", "kb_auth_code", "role_code", "dept"):
+        for fld in ("email", "kb_auth_code", "role_code", "dept"):
             if fld in body:
                 updates.append(f"{fld} = %s")
                 params.append(str(body[fld]).strip())
@@ -3767,7 +3789,9 @@ async def unassign_structure_node(project_id: str, request: Request):
         result_data = raw
     else:
         result_data = {"nodes": nodes}
-    upsert_baseline(db_pid, "01-structure-tree", result_data)
+    # v26.2: 写回 key 必须与读取 key 一致（"structure"）。
+    # 之前误写 "01-structure-tree"，导致清干净的树没有落回前端读取的基线行，撤销指派不生效。
+    upsert_baseline(db_pid, "structure", result_data)
     logger.info(f"[Assign] 节点 {node_id} 已撤销指派")
     return JSONResponse({"status": "unassigned", "node_id": node_id})
 
@@ -5197,23 +5221,27 @@ async def health():
 
 
 class SendEmailRequest(BaseModel):
-    """发送邮件请求"""
-    sender_email: str = Field(..., description="发件人邮箱")
-    sender_auth_code: str = Field(..., description="发件人邮箱授权码")
-    recipient_email: str = Field(..., description="收件人邮箱")
-    subject: str = Field(..., description="邮件主题")
-    body: str = Field(..., description="邮件正文（纯文本）")
-    # v17.12: 邮件开关参数（可选）——传了则先查 email_notification_switch
-    notification_type: Optional[str] = Field(None, description="邮件类型（如 optimize_assignee / stage_confirm_request），触发开关判断")
+    """发送通知请求（v21.0: 通道由 SMTP 邮件改为飞书卡片消息）
+
+    兼容说明: sender_email / sender_auth_code 字段保留但已不再使用
+    （飞书以应用身份发送，无需发件人授权码），老前端可以继续传。
+    """
+    sender_email: Optional[str] = Field(None, description="（已废弃）发件人邮箱，飞书模式忽略")
+    sender_auth_code: Optional[str] = Field(None, description="（已废弃）发件人授权码，飞书模式忽略")
+    recipient_email: str = Field(..., description="收件人邮箱（飞书按邮箱直发）")
+    subject: str = Field(..., description="通知标题")
+    body: str = Field(..., description="通知正文（纯文本，按行拆分为卡片内容）")
+    # v17.12: 通知开关参数（可选）——传了则先查 email_notification_switch
+    notification_type: Optional[str] = Field(None, description="通知类型（如 optimize_assignee / stage_confirm_request），触发开关判断")
     project_id: Optional[str] = Field(None, description="项目ID（字符串），配合 notification_type 查开关")
     stage_id: Optional[int] = Field(None, description="阶段号（0-6），配合 notification_type 查开关")
 
 
 @app.post("/api/email/send")
 async def send_email(req: SendEmailRequest):
-    """通过 QQ 邮箱 SMTP 发送通知邮件"""
-    if not req.sender_email or not req.sender_auth_code or not req.recipient_email:
-        return JSONResponse({"success": False, "error": "发件人/收件人信息不完整"}, status_code=400)
+    """通过飞书机器人发送通知卡片（v21.0: 替代原 SMTP 邮件通道，路由名保留兼容前端）"""
+    if not req.recipient_email:
+        return JSONResponse({"success": False, "error": "收件人邮箱不完整"}, status_code=400)
     # v17.12: 开关判断（传了 notification_type 才检查；未配置/查不到 → 默认开）
     if req.notification_type:
         try:
@@ -5221,66 +5249,26 @@ async def send_email(req: SendEmailRequest):
             db_pid = _resolve_db_project_id(str(req.project_id)) if req.project_id else None
             if db_pid and not is_email_enabled(db_pid, req.stage_id, req.notification_type):
                 return JSONResponse({"success": False, "skipped": True,
-                                     "message": f"邮件已关闭（{req.notification_type}），未发送"})
+                                     "message": f"通知已关闭（{req.notification_type}），未发送"})
         except Exception:
             pass
     try:
-        msg = MIMEText(req.body, "plain", "utf-8")
-        msg["From"] = req.sender_email
-        msg["To"] = req.recipient_email
-        msg["Subject"] = Header(req.subject, "utf-8")
-
-        # 根据发件人邮箱域名自动选择 SMTP 服务器
-        sender_lower = req.sender_email.lower()
-        if 'qq.com' in sender_lower:
-            smtp_host = "smtp.qq.com"
-            smtp_port = 465
-        elif '163.com' in sender_lower:
-            smtp_host = "smtp.163.com"
-            smtp_port = 465
-        elif '126.com' in sender_lower:
-            smtp_host = "smtp.126.com"
-            smtp_port = 465
-        elif 'gmail.com' in sender_lower:
-            smtp_host = "smtp.gmail.com"
-            smtp_port = 465
-        elif 'outlook.com' in sender_lower or 'hotmail.com' in sender_lower:
-            smtp_host = "smtp-mail.outlook.com"
-            smtp_port = 587
-        else:
-            smtp_host = "smtp.qq.com"
-            smtp_port = 465
-
-        logger.info(f"[Email] 开始发送: {req.sender_email} → {req.recipient_email} via {smtp_host}:{smtp_port}")
-
-        context = ssl.create_default_context()
-        if smtp_port == 587:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
-            server.starttls(context=context)
-        else:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=30)
-        server.set_debuglevel(1)
-        server.ehlo()
-        server.login(req.sender_email, req.sender_auth_code)
-        logger.info("[Email] SMTP 登录成功")
-
-        # 发送
-        server.sendmail(req.sender_email, [req.recipient_email], msg.as_string())
-        server.quit()
-
-        logger.info(f"[Email] 发送成功: {req.sender_email} → {req.recipient_email} 「{req.subject}」")
-        return JSONResponse({"success": True})
-    except smtplib.SMTPAuthenticationError:
-        logger.error("[Email] 认证失败 — 邮箱授权码错误或已过期，请重新生成")
-        return JSONResponse({"success": False, "error": "邮箱授权码错误或已过期，请在 QQ 邮箱设置中重新生成授权码"}, status_code=500)
-    except smtplib.SMTPServerDisconnected:
-        logger.error("[Email] 服务器断开连接 — 可能是 IP 被限制或 SSL 配置问题")
-        return JSONResponse({"success": False, "error": "SMTP 服务器断开连接，请检查网络或联系管理员"}, status_code=500)
-    except socket.timeout:
-        logger.error("[Email] 连接超时 — 无法连接到 smtp.qq.com:465")
-        return JSONResponse({"success": False, "error": "连接 QQ 邮箱服务器超时，请检查网络"}, status_code=500)
+        from engine.tools.feishu_push import send_feishu_card, is_configured
+        if not is_configured():
+            return JSONResponse({"success": False,
+                                 "error": "飞书未配置（FEISHU_APP_ID / FEISHU_APP_SECRET）"}, status_code=500)
+        logger.info(f"[FeishuNotify] 开始发送: 飞书应用 → {req.recipient_email} 「{req.subject}」")
+        ok = send_feishu_card(
+            req.recipient_email.strip(), req.subject, req.body,
+            receive_id_type="email",
+        )
+        if ok:
+            logger.info(f"[FeishuNotify] 发送成功: 飞书应用 → {req.recipient_email} 「{req.subject}」")
+            return JSONResponse({"success": True})
+        return JSONResponse({"success": False,
+                             "error": "飞书发送失败（应用可用范围需包含收件用户，详见服务日志）"}, status_code=500)
     except Exception as e:
-        logger.error(f"[Email] 发送失败: {type(e).__name__}: {e}")
+        logger.error(f"[FeishuNotify] 发送失败: {type(e).__name__}: {e}")
         return JSONResponse({"success": False, "error": f"{type(e).__name__}: {str(e)}"}, status_code=500)
 
 

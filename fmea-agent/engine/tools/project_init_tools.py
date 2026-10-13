@@ -144,8 +144,11 @@ def _save_step_result(project_id: str, step_name: str, data: dict) -> str:
         from main import _resolve_db_project_id
         _pid = _resolve_db_project_id(project_id)
         if _pid:
-            upsert_baseline(_pid, step_name.replace("01-", "").replace("-tree", ""), data)
-            logger.info(f"[SaveStep] ✅ DB 写入成功: pid={_pid} step={step_name}")
+            ok = upsert_baseline(_pid, step_name.replace("01-", "").replace("-tree", ""), data)
+            if ok:
+                logger.info(f"[SaveStep] ✅ DB 写入成功: pid={_pid} step={step_name}")
+            else:
+                logger.error(f"[SaveStep] ❌ DB 写入失败(函数返回False): pid={_pid} step={step_name}")
     except Exception as e:
         logger.warning(f"[SaveStep] DB 写入失败: {e}")
     return f"db://{step_name}"
@@ -391,19 +394,6 @@ async def extract_structure_tree_tool(project_id: str, extra_question: str = "")
         JSON 格式的结构树提取结果，包含 saved_to 字段指示保存位置
     """
     logger.info(f"[ExtractTreeTool] 开始 WeKnora 提取: project_id={project_id}")
-
-    # ── v7: DB 已有结构树数据时直接跳过 ──
-    try:
-        from main import _resolve_db_project_id
-        _db_pid = _resolve_db_project_id(project_id)
-        if _db_pid:
-            from engine.tools.fmea_helpers import get_baseline
-            _existing = get_baseline(_db_pid, "structure")
-            if _existing and _existing.get("nodes"):
-                return (f"✅ 结构树已在 DB 中（pid={_db_pid}, {len(_existing['nodes'])} 个节点），"
-                        f"无需重新提取。")
-    except Exception:
-        pass
 
     # v20.3: weknora_kb_id 优先从 projects 表读（v18 后不再写 project_meta.json），
     #         兜底从 project_meta.json 读
@@ -895,11 +885,22 @@ async def _extract_structure_tree_progressive_v41(
     4. 收敛后：最终调整（禁止新增节点，只允许调整/合并）
     """
     from knowledge.weknora_client import get_weknora_client
-    from engine.llm_client import get_llm_client
+    from engine.llm_client import get_llm_client, estimate_tokens, truncate_to_tokens
     from engine.prompts import STRUCTURE_TREE_SYSTEM
 
-    MAX_BATCH_CHARS = 40000   # 降容：留空间给 output tokens
-    FILE_SIZE_THRESHOLD = 50000  # 超大文件（>5万字符）只取前5万
+    # ⚠️ 一定要按 token 而不是字符限量：同样 40000 字符，ASCII（二进制乱码）约 1.2 万 token，
+    #    真实中文约 4 万 token，差 3 倍。之前只按字符截断，换成真实文档后直接把模型打爆了。
+    # 输入预算：字符上限沿用原值 40000，再叠一个 token 上限做硬约束。
+    # 原实现只按字符截断，而同样字符数下 ASCII 与中文的 token 量能差 3 倍，量级不可控。
+    # 上下文窗口 524288，整个语料合计约 16 万字符 / 8 万 token，
+    # 默认预算下 2 批就能覆盖全部文档（原来是 5 批）。
+    MAX_BATCH_CHARS = int(os.getenv("FMEA_STRUCT_BATCH_CHARS", "120000"))
+    MAX_BATCH_TOKENS = int(os.getenv("FMEA_STRUCT_BATCH_TOKENS", "60000"))
+    # 输出预算。⚠️ 别顶到上下文上限：实测 524288 会让推理模型思考 30 分钟不收敛，
+    # 两次调用各撞超时，单批白等 1 小时。32768 实测 150s 内完成；
+    # 再配合 FMEA_LLM_THINKING=off（默认关思考）通常几十秒就出结果。
+    STRUCT_LLM_MAX_TOKENS = int(os.getenv("FMEA_STRUCT_MAX_TOKENS", "32768"))
+    FILE_SIZE_THRESHOLD = 150000  # 单文件字符上限（原 5 万会截断"附件 I"这类长文档）
 
     logger.info(f"[WeKnoraExtract] 开始渐进提取: {subject}")
 
@@ -946,9 +947,10 @@ async def _extract_structure_tree_progressive_v41(
 
         # ── 阶段 2：过滤 + 排序相关文件 ──
         def file_priority(f):
-            ft = (f.get("file_type", "") or "").lower()
+            # 注意：WeKnora 的 file_type 是 "xlsx"/"docx"（不带点），这里要归一化
+            ft = (f.get("file_type", "") or "").lower().lstrip(".")
             fn = (f.get("file_name", f.get("title", "")) or "").lower()
-            if ft in (".xlsx", ".xls", ".csv"): return 10
+            if ft in ("xlsx", "xls", "csv"): return 10
             if "bom" in fn or "物料" in fn: return 9
             if "sor" in fn or "需求" in fn: return 8
             if "图纸" in fn or "电气" in fn: return 7
@@ -975,6 +977,7 @@ async def _extract_structure_tree_progressive_v41(
         tree_nodes: dict = {}
         processed_ids: set = set()
         batch_idx = 0
+        llm_failed_batches: list = []
 
         while True:
             # 取未处理的文件
@@ -999,15 +1002,25 @@ async def _extract_structure_tree_progressive_v41(
             # 并发读取文件完整内容（不截断）
             async def _load_one(f):
                 try:
-                    text = client.preview_knowledge(f["id"])
+                    fname = f.get("title") or f.get("file_name") or f["id"]
+                    # ⚠️ preview 接口返回的是原始文件字节，必须走本地解析拿文本；
+                    # 旧写法 client.preview_knowledge() 会被解码成二进制乱码。
+                    # v24.2: 这一步是**同步阻塞**的（同步 httpx 下载 + pypdf/python-docx 解析），
+                    #   直接跑在事件循环里会把整个 FastAPI 堵死——此刻前端发来的任何请求
+                    #   （包括切 tab 取数据、/approvals-state）都会挂住，页面表现成"一直加载中"。
+                    #   放进线程池执行，既不阻塞事件循环，也让多个文件真正并发。
+                    text = await asyncio.to_thread(
+                        client.preview_knowledge_text,
+                        f["id"], fname, f.get("file_type", ""))
                     if not text:
+                        logger.info(f"[WeKnoraExtract] 跳过（无可用文本）: {fname}")
                         return None
-                    fname = f.get("title", f.get("file_name", f["id"]))
-                    ft = (f.get("file_type", "") or "").lower()
+                    ft = (f.get("file_type", "") or "").lower().lstrip(".")
                     is_relevant = f["id"] in relevant_ids
                     tag = "" if is_relevant else " [兜底]"
                     # BOM Excel 文件截断至 60K（比一般文件略多，但避免溢出）
-                    is_excel = ft in (".xlsx", ".xls", ".csv") or ".xlsx" in fname.lower() or ".xls" in fname.lower()
+                    is_excel = ft in ("xlsx", "xls", "csv") or fname.lower().endswith(
+                        (".xlsx", ".xls", ".csv"))
                     if is_excel:
                         trunc = text[:60000] if len(text) > 60000 else text
                         return {"type": "excel", "name": fname, "text": trunc, "is_relevant": is_relevant}
@@ -1041,11 +1054,15 @@ async def _extract_structure_tree_progressive_v41(
                         continue
                     # 跳过表头/汇总/空行
                     name_candidate = parts[2] if len(parts) > 2 else parts[1]
-                    name_candidate = name_candidate.replace("\n\u200b", "").strip()
+                    # 保留 U+FFFD 交给 _is_junk_node_name 识别（旧代码把它替换成 "?" 反而掩盖了乱码）
+                    name_candidate = name_candidate.replace("\u200b", "").replace("\x00", "").strip()
                     if not name_candidate or len(name_candidate) > 80:
                         continue
                     if name_candidate.lower() in ("名称", "描述", "合计", "总计", "物料名称",
                         "part name", "description", "total", ""):
+                        continue
+                    if _is_junk_node_name(name_candidate):
+                        logger.debug(f"[WeKnoraExtract] 丢弃疑似乱码行: {name_candidate[:60]!r}")
                         continue
                     # 判断是否已有：用 name+level 查重
                     node_name = name_candidate.lower()
@@ -1072,6 +1089,13 @@ async def _extract_structure_tree_progressive_v41(
             combined = "\n\n".join(batch_texts) if batch_texts else ""
             if len(combined) > MAX_BATCH_CHARS:
                 combined = combined[:MAX_BATCH_CHARS]
+            before_tokens = estimate_tokens(combined)
+            if before_tokens > MAX_BATCH_TOKENS:
+                combined = truncate_to_tokens(combined, MAX_BATCH_TOKENS)
+                logger.warning(
+                    f"[WeKnoraExtract] 第{batch_idx + 1}批输入 {before_tokens} tokens "
+                    f"超过预算 {MAX_BATCH_TOKENS}，已按 token 截断至 {len(combined)} 字符"
+                )
 
             tree_summary = _build_tree_summary_for_llm(tree_nodes, subject)
 
@@ -1119,22 +1143,37 @@ async def _extract_structure_tree_progressive_v41(
 
                 batch_idx += 1
                 llm = get_llm_client()
-                result = await llm.safe_call(
-                    system_prompt=STRUCTURE_TREE_SYSTEM,
-                    user_message=user_msg, tools=tools,
-                    probe_key="new_nodes", fallback_to_complete=True,
-                )
-
-                data = llm.extract_json(result)
-                new_nodes = data.get("new_nodes", [])
+                # 推理模型（qwen3 等）的思考内容与正式输出共用 max_tokens，
+                # 8192 会被思考吃光导致 content 为空、误报"LLM 调用失败"
+                llm.max_tokens = STRUCT_LLM_MAX_TOKENS
+                try:
+                    result = await llm.safe_call(
+                        system_prompt=STRUCTURE_TREE_SYSTEM,
+                        user_message=user_msg, tools=tools,
+                        probe_key="new_nodes", fallback_to_complete=True,
+                    )
+                    data = llm.extract_json(result)
+                    new_nodes = data.get("new_nodes", [])
+                except Exception as batch_err:
+                    # 单批失败不能拖垮整轮：老逻辑下 26 批里挂 1 批就整轮失败、一个节点都存不下。
+                    # 这里记录后继续处理下一批，最后在结果里汇总失败的批次号。
+                    llm_failed_batches.append(batch_idx)
+                    logger.error(
+                        f"[WeKnoraExtract] 第{batch_idx}批 LLM 调用失败，跳过该批继续: {batch_err}",
+                        exc_info=True,
+                    )
 
             prev_count = len(tree_nodes)
             for node in new_nodes:
                 nid = node.get("id", f"wn-{len(tree_nodes)+1:04d}")
-                node_name = (node.get("name", "") or "").strip().lower()
+                raw_name = (node.get("name", "") or "").strip()
                 node_level = (node.get("level", "") or "").strip()
-                if not node_name or not node_level:
+                if not raw_name or not node_level:
                     continue
+                if _is_junk_node_name(raw_name):
+                    logger.warning(f"[WeKnoraExtract] 丢弃疑似乱码节点名: {raw_name[:60]!r}")
+                    continue
+                node_name = raw_name.lower()
                 # 用 name+level 去重（id 是 LLM 编的，不可靠）
                 exists = any(
                     (n.get("name","") or "").strip().lower() == node_name
@@ -1180,6 +1219,7 @@ async def _extract_structure_tree_progressive_v41(
 
             try:
                 llm = get_llm_client()
+                llm.max_tokens = STRUCT_LLM_MAX_TOKENS
                 final_result = await llm.safe_call(
                     system_prompt=STRUCTURE_TREE_SYSTEM,
                     user_message=final_msg, fallback_to_complete=True,
@@ -1210,10 +1250,14 @@ async def _extract_structure_tree_progressive_v41(
                 if new_nodes_final:
                     for node in new_nodes_final:
                         nid = node.get("id", f"wn_final-{len(tree_nodes)+1:04d}")
-                        node_name = (node.get("name", "") or "").strip().lower()
+                        raw_name = (node.get("name", "") or "").strip()
                         node_level = (node.get("level", "") or "").strip()
-                        if not node_name or not node_level:
+                        if not raw_name or not node_level:
                             continue
+                        if _is_junk_node_name(raw_name):
+                            logger.warning(f"[WeKnoraExtract] 丢弃疑似乱码节点名: {raw_name[:60]!r}")
+                            continue
+                        node_name = raw_name.lower()
                         exists = any(
                             (n.get("name","") or "").strip().lower() == node_name
                             and (n.get("level","") or "").strip() == node_level
@@ -1244,6 +1288,7 @@ async def _extract_structure_tree_progressive_v41(
             "nodes_count": len(nodes_clean), "elapsed_seconds": elapsed,
             "files_processed": len(processed_ids), "total_files": len(all_files),
             "relevant_files": len(relevant_ids), "batches": batch_idx,
+            "llm_failed_batches": llm_failed_batches,
             "nodes": nodes_clean,
             "fmea_structure_table": _build_fmea_structure_table(nodes_clean),
         }
@@ -1258,18 +1303,22 @@ async def _extract_structure_tree_progressive_v41(
         except Exception:
             pass
 
+        fail_note = (f"，{len(llm_failed_batches)} 批 LLM 失败已跳过"
+                     f"（批次 {llm_failed_batches}）" if llm_failed_batches else "")
         _set_tool_progress(project_id, {
             "tool": "extract_structure_tree", "phase": "done",
-            "message": f"完成: {len(nodes_clean)}节点 ({batch_idx}批, {elapsed}秒)",
+            "message": f"完成: {len(nodes_clean)}节点 ({batch_idx}批, {elapsed}秒){fail_note}",
             "progress": 1.0, "nodes_count": len(nodes_clean),
             "elapsed_seconds": elapsed, "updated_at": time.time(),
         })
-        logger.info(f"[WeKnoraExtract] ✅ 完成: {len(nodes_clean)} 节点, {batch_idx} 批, {elapsed}秒")
+        logger.info(f"[WeKnoraExtract] ✅ 完成: {len(nodes_clean)} 节点, {batch_idx} 批, "
+                    f"{elapsed}秒{fail_note}")
         return json.dumps({
             "success": True, "project_id": project_id, "nodes_count": len(nodes_clean),
             "files_processed": len(processed_ids), "batches": batch_idx,
+            "llm_failed_batches": llm_failed_batches,
             "elapsed_seconds": elapsed, "saved_to": save_path,
-            "message": f"✅ 结构树提取完成：{len(nodes_clean)} 个节点（{batch_idx} 批，{elapsed} 秒）",
+            "message": f"✅ 结构树提取完成：{len(nodes_clean)} 个节点（{batch_idx} 批，{elapsed} 秒）{fail_note}",
         }, ensure_ascii=False)
         return json.dumps({
             "success": True, "project_id": project_id, "nodes_count": len(nodes_clean),
@@ -1311,6 +1360,33 @@ _LEVEL_CODE_RE = re.compile(r"^\d+(?:\.\d+)*$")
 def _looks_like_spreadsheet(fname: str) -> bool:
     fn = (fname or "").lower()
     return fn.endswith((".xlsx", ".xls", ".csv"))
+
+
+def _is_junk_node_name(name: str) -> bool:
+    """判断节点名是否为不可用内容（二进制乱码 / 控制字符 / 纯符号）
+
+    背景：历史上 preview 接口被当文本读取，二进制乱码流入解析链路后
+    会生成大量 `?V?\\x0c.???0&/?x$??Q??m9...` 这类"零件名"。这里做兜底过滤，
+    确保即使上游再出问题，也不会把乱码写进结构树。
+    """
+    if not name:
+        return True
+    s = name.strip()
+    if len(s) < 2:
+        # 单字符：中文/数字可能是"门"这类短名，保留；
+        # 单个 ASCII 字母多为表格标记（RASIC 表的 R/S/I、勾选列），丢弃。
+        return not (s.isalnum() and not s.isascii())
+    # 含替换符或控制字符（除换行/制表）→ 一定是二进制产物
+    if any(ord(ch) < 32 and ch not in "\n\r\t" for ch in s):
+        return True
+    if "\ufffd" in s:
+        return True
+    # "?" 占比过高（解码失败的典型特征）
+    if s.count("?") / len(s) > 0.15:
+        return True
+    # 有效字符（中英文/数字）占比过低
+    meaningful = sum(1 for ch in s if ch.isalnum())
+    return meaningful / len(s) < 0.4
 
 
 def _bom_file_score(fname: str) -> int:
@@ -1361,7 +1437,11 @@ def _parse_bom_spreadsheet(content: bytes, filename: str) -> list:
         try:
             for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 1, 2000),
                                     max_col=25, values_only=True):
-                rows.append([("" if v is None else str(v).replace("\n", " ").strip()) for v in row])
+                def _cell(v):
+                    # 清洗 NUL 与乱码替换符，防止写入 PG 时报 UntranslatableCharacter
+                    s = "" if v is None else str(v).replace("\n", " ").strip()
+                    return s.replace("\x00", "").replace("\ufffd", "?")
+                rows.append([_cell(v) for v in row])
         except Exception:
             continue
         if len(rows) < 3:
@@ -1833,29 +1913,8 @@ async def extract_structure_tree_from_weknora_tool(
     3. 单次 LLM 调用把 BOM 凝结为「产品→总成→零部件」的 FMEA 结构树。
     4. 找不到可解析的 BOM 时，回退到渐进式全文提取（v4.1）。
 
-    v7: 如果 DB 中已有结构树数据（project_id + step_name='structure' baseline 存在），
-        直接跳过提取，避免重复 KB 扫描。
+    v4.2：BOM 优先 + LLM 凝结（允许重复提取，点击即重新生成覆盖）。
     """
-    # ── v7: DB 已有结构树数据时直接跳过 ──
-    try:
-        from main import _resolve_db_project_id  # lazy 避免循环导入
-        _db_pid = _resolve_db_project_id(project_id)
-        if _db_pid:
-            from engine.tools.fmea_helpers import get_baseline
-            _existing = get_baseline(_db_pid, "structure")
-            if _existing and _existing.get("nodes"):
-                _set_tool_progress(project_id, {
-                    "tool": "extract_structure_tree", "phase": "skipped",
-                    "message": f"DB 中已有结构树数据（{len(_existing['nodes'])} 节点），跳过 WeKnora 重新提取",  # fmt: skip
-                    "progress": 1.0,
-                    "nodes_count": len(_existing["nodes"]),
-                    "updated_at": time.time(),
-                })
-                return (f"✅ 结构树已在 DB 中（pid={_db_pid}, {len(_existing['nodes'])} 个节点），"
-                        f"无需重新提取。需要更新结构树时，请手动调用 build_knowledge_base_tool 重建。")
-    except Exception:
-        pass
-
     from knowledge.weknora_client import get_weknora_client
     from engine.llm_client import get_llm_client
     import httpx
@@ -1878,7 +1937,9 @@ async def extract_structure_tree_from_weknora_tool(
         candidates = []
         for f in all_files:
             title = f.get("title") or f.get("file_name") or ""
-            if not _looks_like_spreadsheet(title):
+            # 标题可能不带扩展名，用 file_type 兜底判断是否为表格
+            ftype = (f.get("file_type") or "").lower().lstrip(".")
+            if not (_looks_like_spreadsheet(title) or ftype in ("xlsx", "xls", "csv")):
                 continue
             score = _bom_file_score(title)
             if score > 0:

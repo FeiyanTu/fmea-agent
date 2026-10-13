@@ -10,6 +10,8 @@ fmea-agent/.envbat
 # ── 打包产物 ──
 *.zip
 *.tar.gz
+# hotfix 热修复包目录（含 tar.gz / b64 / 源码副本，属构建产物，不入库）
+hotfix*/
 
 # ── 第三方框架源码（agno 本地注册，不入库）──
 agno/

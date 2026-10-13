@@ -24,8 +24,9 @@ tar -czf fmea-agent-code.tar.gz ^
   --exclude=fmea-agent/logs ^
   --exclude=fmea-agent/tmp ^
   --exclude=fmea-agent/data ^
-  --exclude=fmea-agent/knowledge ^
+  --exclude=fmea-agent/knowledge/*/* ^
   --exclude=fmea-agent/.env ^
+  --exclude=fmea-agent/.envbat ^
   fmea-agent
 if errorlevel 1 goto FAIL
 
